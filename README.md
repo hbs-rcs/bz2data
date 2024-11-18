@@ -7,11 +7,14 @@ Compress data into bz2 files
 Build:
 
 	python3 -m pip install --upgrade build (Unix/macOS)
-	py -m pip install --upgrade build (Windows)
+	
+    py -m pip install --upgrade build (Windows)
 
-    run from package directory:
+    Run from package directory:
+    
     python3 -m build (Unix/macOS)
-	py -m build (Windows)
+	
+    py -m build (Windows)
 
 Source tar ball and wheel distribution will be saved in dist folder
 
@@ -26,8 +29,6 @@ Usage:
 
     import bz2data
 
-    data_manager = bz2data.DataManager()
-
     key_id_1 = 'KEY-ID-1'
     key_1 = 'KEY-1'
     source_bucket = 'SOURCE-BUCKET-NAME'
@@ -36,6 +37,8 @@ Usage:
     key_2 = 'KEY-2'
     destination_bucket = 'DESTINATION-BUCKET-NAME'
 
+    data_manager = bz2data.DataManager()
+    
     data_manager.sourceBucket(key_id_1, key_1, source_bucket)
 
     data_manager.destinationBucket(key_id_2, key_2, destination_bucket)
