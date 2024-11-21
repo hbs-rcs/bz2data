@@ -36,8 +36,10 @@ Usage:
     key_id_2 = 'KEY-ID-2'
     key_2 = 'KEY-2'
     destination_bucket = 'DESTINATION-BUCKET-NAME'
+    
+    names = 'research-data-archive'
 
-    data_manager = bz2data.DataManager()
+    data_manager = bz2data.DataManager(archive_names = names)
     
     data_manager.sourceBucket(key_id_1, key_1, source_bucket)
 
@@ -60,13 +62,9 @@ Change destination bucket storage class (default: 'STANDARD')
 
     'STANDARD'|'REDUCED_REDUNDANCY'|'STANDARD_IA'|'ONEZONE_IA'|'INTELLIGENT_TIERING'|'GLACIER'|'DEEP_ARCHIVE'|'OUTPOSTS'|'GLACIER_IR'|'SNOW'|'EXPRESS_ONEZONE'
  
-Destination zip files will be counted and this count digit 
-will be appended to the name, the top level directory
-of the last digit count will be used when the archive has reached
-zip_size and is saved; this is because if top level directories are too small 
-in size it will most likely not create big enough destination files (default: 5GB).
-You must be aware that top level directories contain a lot of files
-or are big in size as this module tries to maximize destination file size as well as 
-per object operations when saving, to change this default behavior use
+Destination zip file names will have a count digit appended to the 
+string passed to 'archive_names' for each zip archive created when 
+zip file zise is reached, for example:
 
-    data_manager = bz2data.DataManager(merge_dirs = False) 
+    research-data-0.bz2
+
