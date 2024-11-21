@@ -66,5 +66,5 @@ Destination zip file names will have a count digit appended to the
 string passed to 'archive_names' for each zip archive created when 
 zip file zise is reached, for example:
 
-    research-data-0.bz2
+    research-data-archive-0.bz2
 
