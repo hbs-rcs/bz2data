@@ -52,11 +52,11 @@ Info:
 
 Change zip file size (default: 5000000000)
 
-    data_manager = bz2data.DataManager(zip_size = 5000000001)
+    data_manager = bz2data.DataManager(zip_size = 5000000001, archive_names = names)
 
 Change destination bucket storage class (default: 'STANDARD')
 
-    data_manager = bz2data.DataManager(destination_class = 'DEEP_ARCHIVE')
+    data_manager = bz2data.DataManager(archive_names = names, destination_class = 'DEEP_ARCHIVE')
 
     S3 storage classes:
 
