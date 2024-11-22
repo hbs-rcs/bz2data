@@ -63,7 +63,7 @@ Change destination bucket storage class (default: 'STANDARD')
     'STANDARD'|'REDUCED_REDUNDANCY'|'STANDARD_IA'|'ONEZONE_IA'|'INTELLIGENT_TIERING'|'GLACIER'|'DEEP_ARCHIVE'|'OUTPOSTS'|'GLACIER_IR'|'SNOW'|'EXPRESS_ONEZONE'
  
 Destination zip file names will have a count digit appended to the 
-string passed to 'archive_names' for each zip archive created when 
+string passed as the 'archive_names' parameter for each zip archive created when 
 zip file zise is reached, for example:
 
     research-data-archive-0.bz2
