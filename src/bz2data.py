@@ -6,7 +6,7 @@ import io
 
 class DataManager():
 
-    def __init__(self, zip_size = 5000000000, archive_names = '', destination_class = 'STANDARD'):
+    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD'):
 
         '''
 
