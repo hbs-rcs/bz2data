@@ -45,7 +45,7 @@ Usage:
 
     data_manager.destinationBucket(key_id_2, key_2, destination_bucket)
 
-    data_manager.transfer()
+    data_manager.compress()
 
 
 Info:
