@@ -1,7 +1,7 @@
 
 # BZ2DATA
 
-Compress data into bz2 files
+Compress data into bz2 zip archives
 
 
 Build:
