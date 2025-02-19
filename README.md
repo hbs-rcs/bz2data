@@ -29,21 +29,21 @@ Usage:
 
     import bz2data
 
-    key_id_1 = 'KEY-ID-1'
-    key_1 = 'KEY-1'
+    src_key_id = 'SRC-KEY-ID'
+    src_key = 'SRC-KEY'
     source_bucket = 'SOURCE-BUCKET-NAME'
 
-    key_id_2 = 'KEY-ID-2'
-    key_2 = 'KEY-2'
+    dest_key_id = 'DEST-KEY-ID'
+    dest_key = 'DEST-KEY'
     destination_bucket = 'DESTINATION-BUCKET-NAME'
     
     names = 'research-data-archive'
 
     data_manager = bz2data.DataManager(archive_names = names)
     
-    data_manager.sourceBucket(key_id_1, key_1, source_bucket)
+    data_manager.sourceBucket(src_key_id, src_key, source_bucket)
 
-    data_manager.destinationBucket(key_id_2, key_2, destination_bucket)
+    data_manager.destinationBucket(dest_key_id, dest_key, destination_bucket)
 
     data_manager.compress()
 
@@ -56,11 +56,19 @@ Change zip file size (default: 5000000000)
 
 Change destination bucket storage class (default: 'STANDARD')
 
-    data_manager = bz2data.DataManager(archive_names = names, destination_class = 'DEEP_ARCHIVE')
+    data_manager = bz2data.DataManager(archive_names = names, destination_class = 'STANDARD_IA')
 
     S3 storage classes:
 
     'STANDARD'|'REDUCED_REDUNDANCY'|'STANDARD_IA'|'ONEZONE_IA'|'INTELLIGENT_TIERING'|'GLACIER'|'DEEP_ARCHIVE'|'OUTPOSTS'|'GLACIER_IR'|'SNOW'|'EXPRESS_ONEZONE'
+    
+Enable logging to a file
+
+    data_manager = bz2data.DataManager(archive_names = names, verbose_level = 'INFO', log_file = './bz2data.log')
+
+    Log levels:
+
+    'DEBUG'|'INFO'|'WARNING'|'ERROR'|'CRITICAL'
  
 Destination zip file names will have a count digit appended to the 
 string passed as the 'archive_names' parameter for each zip archive created when 
