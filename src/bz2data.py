@@ -7,7 +7,7 @@ import io
 
 class DataManager():
 
-    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', verbose_level = '', log_file = './bz2data.log'):
+    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', verbose_level = '', log_file = './bz2data.log', timeout = 0):
 
         '''
 
@@ -81,6 +81,8 @@ class DataManager():
         zip_buffer.seek(0)
         self.logger(f'\nUpdloading {save_name}') if verbose_level else None
         destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
+        
+        time.sleep(timeout) if timeout else None
 
     def transfer(self):
         if all((self.source_bucket, self.destination_bucket)):
