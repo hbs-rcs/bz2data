@@ -30,6 +30,8 @@ class DataManager():
         self.objects = 0
         self.source_count = 0
         self.zip_list = []
+        
+        self.logger('BZ2DATA Harvard Business School (2025)\n') if verbose_level else None
 
     def sourceBucket(self, key_id = '', key = '', bucket = ''):
         if all((key_id, key, bucket)):

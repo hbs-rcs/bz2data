@@ -22,8 +22,9 @@ def get_logger(level = 'INFO', log_file = './bz2data.log'):
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
+    level_dict = {'DEBUG': logger.debug, 'INFO': logger.info, 'WARNING': logger.warning, 'ERROR': logger.error, 'CRITICAL': logger.critical}
     
-    return logger
+    return level_dict[level]
 
 ## Log some messages
 #logger.debug('This is a debug message')
