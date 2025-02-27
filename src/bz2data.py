@@ -31,6 +31,7 @@ class DataManager():
         self.objects = 0
         self.source_count = 0
         self.zip_list = []
+        self.timeout = timeout
         
         self.logger('BZ2DATA Harvard Business School (2025)\n') if self.verbose_level else None
 
@@ -44,11 +45,12 @@ class DataManager():
             self.source_bucket = bucket
             s3source = source_sess.resource('s3')
             source_bucket = s3source.Bucket(bucket)
-            total_objs = sum(1 for _ in source_bucket.objects.all())
-            self.objects = total_objs
-
-            total_bytes = sum([object.size for object in source_bucket.objects.all()])
-            self.logger(f'\nSource:\nTotal bucket size: {total_bytes/1024/1024/1024} GB\ntotal bucket objects: {total_objs}') if self.verbose_level else None
+            
+#           # Counting the objects can take a very long time for large datasets and there is an additional charge for listing them as well.
+#            total_objs = sum(1 for _ in source_bucket.objects.all())
+#            self.objects = total_objs
+#            total_bytes = sum([object.size for object in source_bucket.objects.all()])
+#            self.logger(f'\nSource:\nTotal bucket size: {total_bytes/1024/1024/1024} GB\ntotal bucket objects: {total_objs}') if self.verbose_level else None
 
     def destinationBucket(self, key_id = '', key = '', bucket = ''):
         if all((key_id, key, bucket)):
@@ -60,10 +62,6 @@ class DataManager():
             self.destination_bucket = bucket
             s3destination = dest_sess.resource('s3')
             destination_bucket = s3destination.Bucket(bucket)
-            total_objs = sum(1 for _ in destination_bucket.objects.all())
-
-            total_bytes = sum([object.size for object in destination_bucket.objects.all()])
-            self.logger(f'\nDestination:\nTotal bucket size: {total_bytes/1024/1024/1024} GB\ntotal bucket objects: {total_objs}') if self.verbose_level else None
 
     def generate_zip(self, files = [], save_name = ''):
         source_client = self.source.client('s3')
@@ -77,15 +75,18 @@ class DataManager():
                 object_size += object['Size']
                 file_obj = source_client.get_object(Bucket = self.source_bucket, Key = object['Key'])
                 file_content = file_obj['Body'].read()
-                self.logger(f'\nWriting: {object['Key']}\nSize: {object['Size']}' + ' ' + f'Total: {object_size}') if self.verbose_level else None
+                self.logger(f'Writing: {object['Key']} Size: {object['Size']}' + ' ' + f'Total: {object_size}') if self.verbose_level else None
                 zip_file.writestr(object['Key'], file_content, compress_type = zipfile.ZIP_BZIP2)
             zip_file.close()
 
         zip_buffer.seek(0)
-        self.logger(f'\nUpdloading {save_name}') if self.verbose_level else None
+        self.logger(f'Uploading {save_name}') if self.verbose_level else None
+        t = time.time()
         destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
+        upload_t = time.time() - t
+        self.logger(f'Upload time: {upload_t}\n') if self.verbose_level else None
         
-        time.sleep(timeout) if timeout else None
+        time.sleep(self.timeout) if self.timeout else None
 
     def transfer(self):
         if all((self.source_bucket, self.destination_bucket)):
@@ -100,7 +101,7 @@ class DataManager():
                     file_obj = source_client.get_object(Bucket=self.source_bucket, Key=obj['Key'])
                     file_content = file_obj['Body'].read()
                     destination_key = obj['Key']
-                    self.logger(f'\nUpdloading {destination_key}') if self.verbose_level else None
+                    self.logger(f'\nUploading {destination_key}') if self.verbose_level else None
                     destination_client.put_object(Bucket = self.destination_bucket, Key = destination_key, Body = file_content, StorageClass = self.destination_class)
 
     def compress(self):
@@ -116,18 +117,18 @@ class DataManager():
                     self.file_size = obj['Size']
                     self.obj_size += self.file_size
 
+                    # Zip buffer size has been exceeded
+                    
                     if self.obj_size > self.zip_size:
-                        self.logger(f'\nExceeded zip size: {self.obj_size}') if self.verbose_level else None
+                        self.logger(f'Exceeded zip size: {self.obj_size}\n') if self.verbose_level else None
 
+                        # When the file is bigger than the zip size, zip and upload the file then continue adding files to the zip buffer, same
+                        # when the buffer is too small to prevent sporadic tiny zip files in the dataset.
+                        
                         if self.file_size >= self.zip_size or (self.obj_size - self.file_size) < self.file_size:
-                            self.logger(f'\nFile exceeds zip size or zip buffer is too small') if self.verbose_level else None
+                            self.logger(f'File exceeds zip size or zip buffer is too small\n') if self.verbose_level else None
                             buff_size = self.obj_size - self.file_size
                             self.logger(f'Object: {self.file_size} Buffer {buff_size}') if self.verbose_level else None
-
-                            if self.source_count == self.objects:
-                                destination_key = f'{self.zip_name + '-' + str(self.object_count)}.bz2'
-                                self.generate_zip(self.zip_list, destination_key)
-                                self.object_count += 1
 
                             destination_key = f'{self.zip_name + '-' + str(self.object_count)}.bz2'
                             self.generate_zip([obj], destination_key)
@@ -142,9 +143,8 @@ class DataManager():
 
                     self.zip_list.append(obj)
 
-                    if self.source_count == self.objects:
-                        destination_key = f'{self.zip_name + '-' + str(self.object_count)}.bz2'
-                        self.generate_zip(self.zip_list, destination_key)
-                        self.object_count += 1
+            destination_key = f'{self.zip_name + '-' + str(self.object_count)}.bz2'
+            self.generate_zip(self.zip_list, destination_key)
+            self.object_count += 1
 
 
