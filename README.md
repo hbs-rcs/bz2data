@@ -1,7 +1,7 @@
 
 # BZ2DATA
 
-Compress data into bz2 zip archives
+Compress S3 data into bz2 archives
 
 
 Build:
