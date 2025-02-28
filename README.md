@@ -76,3 +76,14 @@ zip file zise is reached, for example:
 
     research-data-archive-0.bz2
 
+Upload from filesystem
+
+    data_manager = bz2data.DataManager(archive_names = names, verbose_level = 'INFO', log_file = './bz2data.log')
+    
+    data_manager.sourcePath('Desktop/unzipped')
+
+    data_manager.destinationBucket(key_id_2, key_2, destination_bucket)
+
+    data_manager.upload()
+
+
