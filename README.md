@@ -76,7 +76,7 @@ zip file zise is reached, for example:
 
     research-data-archive-0.bz2
 
-Upload from filesystem
+Upload and compress from disk
 
     data_manager = bz2data.DataManager(archive_names = names, verbose_level = 'INFO', log_file = './bz2data.log')
     
@@ -85,5 +85,15 @@ Upload from filesystem
     data_manager.destinationBucket(key_id_2, key_2, destination_bucket)
 
     data_manager.upload()
+
+Download and compress to disk
+
+    data_manager = bz2data.DataManager(archive_names = names, verbose_level = 'INFO', log_file = './bz2data.log')
+    
+    data_manager.destinationPath('Desktop/zipped')
+
+    data_manager.sourceBucket(key_id_1, key_1, source_bucket)
+
+    data_manager.download()
 
 

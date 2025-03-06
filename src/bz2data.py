@@ -261,7 +261,7 @@ class DataManager():
             self.upload_zip(self.zip_list, destination_key)
             self.object_count += 1
 
-    def stage(self):
+    def download(self):
         if all((self.source_bucket, self.destination_directory)):
             source_client = self.source.client('s3')
             paginator = source_client.get_paginator('list_objects_v2')
