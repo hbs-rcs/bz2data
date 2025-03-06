@@ -36,6 +36,7 @@ class DataManager():
         self.timeout = timeout
         self.source_directory = ''
         self.page_size = ''
+        self.destination_directory = ''
         
         self.logger('BZ2DATA Harvard Business School (2025)\n') if self.verbose_level else None
 
@@ -71,6 +72,13 @@ class DataManager():
         self.source_directory = source_directory
         self.page_size = page_size
         if os.path.exists(self.source_directory):
+            self.logger(f'The path {self.source_directory} exists.') if self.verbose_level else None
+        else:
+            self.logger(f'The path {self.source_directory} does not exist.') if self.verbose_level else None
+            
+    def destinationPath(self, destination_directory = ''):
+        self.destination_directory = destination_directory
+        if os.path.exists(self.destination_directory):
             self.logger(f'The path {self.source_directory} exists.') if self.verbose_level else None
         else:
             self.logger(f'The path {self.source_directory} does not exist.') if self.verbose_level else None
@@ -126,6 +134,32 @@ class DataManager():
         
         time.sleep(self.timeout) if self.timeout else None
 
+    def download_zip(self, files = [], save_name = ''):
+        source_client = self.source.client('s3')
+        zip_buffer = io.BytesIO()
+        t = time.time()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
+            object_size = 0
+            while files:
+                object = files.pop(0)
+                object_size += object['Size']
+                file_obj = source_client.get_object(Bucket = self.source_bucket, Key = object['Key'])
+                file_content = file_obj['Body'].read()
+                self.logger(f'Writing: {object['Key']} Size: {object['Size']}' + ' ' + f'Total: {object_size}') if self.verbose_level else None
+                zip_file.writestr(object['Key'], file_content, compress_type = zipfile.ZIP_BZIP2)
+            zip_file.close()
+
+        zip_buffer.seek(0)
+        destination_name = os.path.join(self.destination_directory, save_name)
+        self.logger(f'Downloading to {destination_name}') if self.verbose_level else None
+        
+        with open(destination_name, 'wb') as fd:
+            fd.write(zip_buffer.getvalue())
+        download_t = time.time() - t
+        self.logger(f'Download time: {download_t}\n') if self.verbose_level else None
+        
+        time.sleep(self.timeout) if self.timeout else None
+        
     def transfer(self):
         if all((self.source_bucket, self.destination_bucket)):
             source_client = self.source.client('s3')
@@ -227,5 +261,46 @@ class DataManager():
             self.upload_zip(self.zip_list, destination_key)
             self.object_count += 1
 
+    def stage(self):
+        if all((self.source_bucket, self.destination_directory)):
+            source_client = self.source.client('s3')
+            paginator = source_client.get_paginator('list_objects_v2')
 
+            for page in paginator.paginate(Bucket=self.source_bucket):
+
+                for idx, obj in enumerate(page.get('Contents', [])):
+
+                    self.source_count += 1
+                    self.file_size = obj['Size']
+                    self.obj_size += self.file_size
+
+                    # Zip buffer size has been exceeded
+                    
+                    if self.obj_size > self.zip_size:
+                        self.logger(f'Exceeded zip size: {self.obj_size}\n') if self.verbose_level else None
+
+                        # When the file is bigger than the zip size, zip and upload the file then continue adding files to the zip buffer, same
+                        # when the buffer is too small to prevent sporadic tiny zip files in the dataset.
+                        
+                        if self.file_size >= self.zip_size or (self.obj_size - self.file_size) < self.file_size:
+                            self.logger(f'File exceeds zip size or zip buffer is too small\n') if self.verbose_level else None
+                            buff_size = self.obj_size - self.file_size
+                            self.logger(f'Object: {self.file_size} Buffer {buff_size}') if self.verbose_level else None
+
+                            destination_key = f'{self.zip_name + '-' + str(self.object_count)}.bz2'
+                            self.download_zip([obj], destination_key)
+                            self.object_count += 1
+                            self.obj_size = self.obj_size - self.file_size
+                            continue
+
+                        destination_key = f'{self.zip_name + '-' + str(self.object_count)}.bz2'
+                        self.download_zip(self.zip_list, destination_key)
+                        self.object_count += 1
+                        self.obj_size = self.file_size
+
+                    self.zip_list.append(obj)
+
+            destination_key = f'{self.zip_name + '-' + str(self.object_count)}.bz2'
+            self.download_zip(self.zip_list, destination_key)
+            self.object_count += 1
 
