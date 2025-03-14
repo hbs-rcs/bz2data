@@ -1,7 +1,7 @@
 
 # BZ2DATA
 
-Compress S3 data into bz2 archives
+Zip archive S3 data, at least v4.6 to extract, compression method=bzip2
 
 
 Build:
@@ -66,7 +66,7 @@ Destination zip file names will have a count digit appended to the
 string passed as the 'archive_names' parameter for each zip archive created when 
 zip file zise is reached, for example:
 
-    research-data-archive-0.bz2
+    research-data-archive-0.zip
 
 Upload and compress from disk
 
@@ -92,4 +92,12 @@ Resume transfer
 
     You can resume a transfer that was interrupted by passing the original log as the resume option string
     
-    data_manager = bz2data.DataManager(archive_names = names, log_file = './new-bz2data.log', resume = './bz2data.log')
+    data_manager = bz2data.DataManager(archive_names = names, log_file = './new-bz2data.log')
+    
+    data_manager.compress(resume = './bz2data.log')
+
+Extract using command line
+
+    Most operating systems built in zip utility will extract by double clicking but 7zip will work on CLI as well
+    
+    7za x research-data-archive-0.zip

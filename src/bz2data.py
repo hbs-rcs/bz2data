@@ -10,7 +10,7 @@ import os
 
 class DataManager():
 
-    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', log_file = './bz2data.log', timeout = 0, resume = ''):
+    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', log_file = './bz2data.log', timeout = 0):
 
         '''
 
@@ -38,7 +38,6 @@ class DataManager():
         self.source_directory = ''
         self.page_size = ''
         self.destination_directory = ''
-        self.resume = resume
         self.total = 0
 
     def sourceBucket(self, key_id = '', key = '', bucket = ''):
@@ -71,7 +70,7 @@ class DataManager():
 
     def sourcePath(self, source_directory = '', page_size = 1000):
 
-        if os.path.exists(self.source_directory):
+        if os.path.exists(source_directory):
             self.source_directory = source_directory
             self.page_size = page_size
         else:
@@ -79,7 +78,7 @@ class DataManager():
 
     def destinationPath(self, destination_directory = ''):
 
-        if os.path.exists(self.destination_directory):
+        if os.path.exists(destination_directory):
             self.destination_directory = destination_directory
         else:
             self.logger(f'The path {self.source_directory} does not exist.')
@@ -176,15 +175,15 @@ class DataManager():
                     self.logger(f'\nUploading {destination_key}')
                     destination_client.put_object(Bucket = self.destination_bucket, Key = destination_key, Body = file_content, StorageClass = self.destination_class)
 
-    def compress(self):
+    def compress(self, resume = ''):
         if all((self.source_bucket, self.destination_bucket)):
 
             with open(self.log_file, 'w'):
                 pass
             self.logger('BZ2DATA Harvard Business School (2025)\n')
             
-            if self.resume:
-                df = pd.read_csv(self.resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
+            if resume:
+                df = pd.read_csv(resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
                 resume_idx = df.where(df['ACTION'] != 'Adding:').last_valid_index()
                 self.object_count = int(df.loc[resume_idx].FILE.split('.')[0][-1]) + 1
                 Page, Id = df[['PAGE', 'ID']].iloc[resume_idx].values
@@ -195,12 +194,12 @@ class DataManager():
 
             for pidx, page in enumerate(paginator.paginate(Bucket=self.source_bucket)):
             
-                if self.resume and pidx < Page:
+                if resume and pidx < Page:
                     continue
 
                 for idx, obj in enumerate(page.get('Contents', [])):
                 
-                    if self.resume and idx <= RIDX:
+                    if resume and idx <= RIDX:
                         continue
 
                     self.source_count += 1
@@ -218,32 +217,32 @@ class DataManager():
 
                             buff_size = self.obj_size - self.file_size
 
-                            destination_key = self.zip_name + '-' + str(self.object_count) + '.bz2'
+                            destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
                             self.generate_zip([obj], destination_key)
                             self.object_count += 1
                             self.obj_size = self.obj_size - self.file_size
                             continue
 
-                        destination_key = self.zip_name + '-' + str(self.object_count) + '.bz2'
+                        destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
                         self.generate_zip(self.zip_list, destination_key)
                         self.object_count += 1
                         self.obj_size = self.file_size
 
                     self.zip_list.append((pidx, idx, obj))
 
-            destination_key = self.zip_name + '-' + str(self.object_count) + '.bz2'
+            destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
             self.generate_zip(self.zip_list, destination_key)
             self.object_count += 1
 
-    def upload(self):
+    def upload(self, resume = ''):
         if all((self.source_directory, self.destination_bucket)):
 
             with open(self.log_file, 'w'):
                 pass
             self.logger('BZ2DATA Harvard Business School (2025)\n')
 
-            if self.resume:
-                df = pd.read_csv(self.resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
+            if resume:
+                df = pd.read_csv(resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
                 resume_idx = df.where(df['ACTION'] != 'Adding:').last_valid_index()
                 self.object_count = int(df.loc[resume_idx].FILE.split('.')[0][-1]) + 1
                 Page, Id = df[['PAGE', 'ID']].iloc[resume_idx].values
@@ -253,14 +252,14 @@ class DataManager():
 
             for pidx, page in enumerate(range(0, len(all_files), self.page_size)):
             
-                if self.resume and pidx < Page:
+                if resume and pidx < Page:
                     continue
 
                 page_list = all_files[page: page + self.page_size]
                 
                 for idx, obj in enumerate(page_list):
 
-                    if self.resume and idx <= RIDX:
+                    if resume and idx <= RIDX:
                         continue
 
                     self.source_count += 1
@@ -278,31 +277,31 @@ class DataManager():
                         
                             buff_size = self.obj_size - self.file_size
 
-                            destination_key = self.zip_name + '-' + str(self.object_count) + '.bz2'
+                            destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
                             self.upload_zip([obj], destination_key)
                             self.object_count += 1
                             self.obj_size = self.obj_size - self.file_size
                             continue
 
-                        destination_key = self.zip_name + '-' + str(self.object_count) + '.bz2'
+                        destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
                         self.upload_zip(self.zip_list, destination_key)
                         self.object_count += 1
                         self.obj_size = self.file_size
 
                     self.zip_list.append((pidx, idx, obj))
                     
-            destination_key = self.zip_name + '-' + str(self.object_count) + '.bz2'
+            destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
             self.upload_zip(self.zip_list, destination_key)
             self.object_count += 1
 
-    def download(self):
+    def download(self, resume = ''):
 
         with open(self.log_file, 'w'):
             pass
         self.logger('BZ2DATA Harvard Business School (2025)\n')
         
-        if self.resume:
-            df = pd.read_csv(self.resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
+        if resume:
+            df = pd.read_csv(resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
             resume_idx = df.where(df['ACTION'] != 'Adding:').last_valid_index()
             self.object_count = int(df.loc[resume_idx].FILE.split('.')[0][-1]) + 1
             Page, Id = df[['PAGE', 'ID']].iloc[resume_idx].values
@@ -314,12 +313,12 @@ class DataManager():
 
             for pidx, page in enumerate(paginator.paginate(Bucket=self.source_bucket)):
 
-                if self.resume and pidx < Page:
+                if resume and pidx < Page:
                     continue
 
                 for idx, obj in enumerate(page.get('Contents', [])):
 
-                    if self.resume and idx <= RIDX:
+                    if resume and idx <= RIDX:
                         continue
 
                     self.source_count += 1
@@ -337,20 +336,20 @@ class DataManager():
 
                             buff_size = self.obj_size - self.file_size
 
-                            destination_key = self.zip_name + '-' + str(self.object_count) + '.bz2'
+                            destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
                             self.download_zip([obj], destination_key)
                             self.object_count += 1
                             self.obj_size = self.obj_size - self.file_size
                             continue
 
-                        destination_key = self.zip_name + '-' + str(self.object_count) + '.bz2'
+                        destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
                         self.download_zip(self.zip_list, destination_key)
                         self.object_count += 1
                         self.obj_size = self.file_size
 
                     self.zip_list.append((pidx, idx, obj))
 
-            destination_key = self.zip_name + '-' + str(self.object_count) + '.bz2'
+            destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
             self.download_zip(self.zip_list, destination_key)
             self.object_count += 1
 
