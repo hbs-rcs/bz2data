@@ -61,14 +61,6 @@ Change destination bucket storage class (default: 'STANDARD')
     S3 storage classes:
 
     'STANDARD'|'REDUCED_REDUNDANCY'|'STANDARD_IA'|'ONEZONE_IA'|'INTELLIGENT_TIERING'|'GLACIER'|'DEEP_ARCHIVE'|'OUTPOSTS'|'GLACIER_IR'|'SNOW'|'EXPRESS_ONEZONE'
-    
-Enable logging to a file
-
-    data_manager = bz2data.DataManager(archive_names = names, verbose_level = 'INFO', log_file = './bz2data.log')
-
-    Log levels:
-
-    'DEBUG'|'INFO'|'WARNING'|'ERROR'|'CRITICAL'
  
 Destination zip file names will have a count digit appended to the 
 string passed as the 'archive_names' parameter for each zip archive created when 
@@ -78,7 +70,7 @@ zip file zise is reached, for example:
 
 Upload and compress from disk
 
-    data_manager = bz2data.DataManager(archive_names = names, verbose_level = 'INFO', log_file = './bz2data.log')
+    data_manager = bz2data.DataManager(archive_names = names, log_file = './bz2data.log')
     
     data_manager.sourcePath('Desktop/unzipped')
 
@@ -88,7 +80,7 @@ Upload and compress from disk
 
 Download and compress to disk
 
-    data_manager = bz2data.DataManager(archive_names = names, verbose_level = 'INFO', log_file = './bz2data.log')
+    data_manager = bz2data.DataManager(archive_names = names, log_file = './bz2data.log')
     
     data_manager.destinationPath('Desktop/zipped')
 
@@ -96,4 +88,8 @@ Download and compress to disk
 
     data_manager.download()
 
+Resume transfer
 
+    You can resume a transfer that was interrupted by passing the original log as the resume option string
+    
+    data_manager = bz2data.DataManager(archive_names = names, log_file = './new-bz2data.log', resume = './bz2data.log')

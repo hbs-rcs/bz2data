@@ -1,6 +1,7 @@
 
 from filelog import get_logger
 from glob import glob
+import pandas as pd
 import zipfile
 import boto3
 import time
@@ -9,7 +10,7 @@ import os
 
 class DataManager():
 
-    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', log_file = './bz2data.log', timeout = 0):
+    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', log_file = './bz2data.log', timeout = 0, resume = ''):
 
         '''
 
@@ -37,6 +38,7 @@ class DataManager():
         self.source_directory = ''
         self.page_size = ''
         self.destination_directory = ''
+        self.resume = resume
         self.total = 0
 
     def sourceBucket(self, key_id = '', key = '', bucket = ''):
@@ -180,13 +182,26 @@ class DataManager():
             with open(self.log_file, 'w'):
                 pass
             self.logger('BZ2DATA Harvard Business School (2025)\n')
+            
+            if self.resume:
+                df = pd.read_csv(self.resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
+                resume_idx = df.where(df['ACTION'] != 'Adding:').last_valid_index()
+                self.object_count = int(df.loc[resume_idx].FILE.split('.')[0][-1]) + 1
+                Page, Id = df[['PAGE', 'ID']].iloc[resume_idx].values
+                RIDX = df.loc[Id].ID
 
             source_client = self.source.client('s3')
             paginator = source_client.get_paginator('list_objects_v2')
 
             for pidx, page in enumerate(paginator.paginate(Bucket=self.source_bucket)):
+            
+                if self.resume and pidx < Page:
+                    continue
 
                 for idx, obj in enumerate(page.get('Contents', [])):
+                
+                    if self.resume and idx <= RIDX:
+                        continue
 
                     self.source_count += 1
                     self.file_size = obj['Size']
@@ -195,15 +210,13 @@ class DataManager():
                     # Zip buffer size has been exceeded
 
                     if self.obj_size > self.zip_size:
-                        self.logger(f'Exceeded zip size: {self.obj_size}\n')
 
                         # When the file is bigger than the zip size, zip and upload the file then continue adding files to the zip buffer, same
                         # when the buffer is too small to prevent sporadic tiny zip files in the dataset.
                         
                         if self.file_size >= self.zip_size or (self.obj_size - self.file_size) < self.file_size:
-                            self.logger(f'File exceeds zip size or zip buffer is too small\n')
+
                             buff_size = self.obj_size - self.file_size
-                            self.logger(f'Object: {self.file_size} Buffer {buff_size}')
 
                             destination_key = self.zip_name + '-' + str(self.object_count) + '.bz2'
                             self.generate_zip([obj], destination_key)
@@ -229,12 +242,27 @@ class DataManager():
                 pass
             self.logger('BZ2DATA Harvard Business School (2025)\n')
 
+            if self.resume:
+                df = pd.read_csv(self.resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
+                resume_idx = df.where(df['ACTION'] != 'Adding:').last_valid_index()
+                self.object_count = int(df.loc[resume_idx].FILE.split('.')[0][-1]) + 1
+                Page, Id = df[['PAGE', 'ID']].iloc[resume_idx].values
+                RIDX = df.loc[Id].ID
+
             all_files = glob(f'{self.source_directory}/**/*.*', recursive=True)
 
             for pidx, page in enumerate(range(0, len(all_files), self.page_size)):
+            
+                if self.resume and pidx < Page:
+                    continue
+
                 page_list = all_files[page: page + self.page_size]
                 
                 for idx, obj in enumerate(page_list):
+
+                    if self.resume and idx <= RIDX:
+                        continue
+
                     self.source_count += 1
                     self.file_size = os.path.getsize(obj)
                     self.obj_size += self.file_size
@@ -242,15 +270,13 @@ class DataManager():
                     # Zip buffer size has been exceeded
 
                     if self.obj_size > self.zip_size:
-                        self.logger(f'Exceeded zip size: {self.obj_size}\n')
 
                         # When the file is bigger than the zip size, zip and upload the file then continue adding files to the zip buffer, same
                         # when the buffer is too small to prevent sporadic tiny zip files in the dataset.
 
                         if self.file_size >= self.zip_size or (self.obj_size - self.file_size) < self.file_size:
-                            self.logger(f'File exceeds zip size or zip buffer is too small\n')
+                        
                             buff_size = self.obj_size - self.file_size
-                            self.logger(f'Object: {self.file_size} Buffer {buff_size}')
 
                             destination_key = self.zip_name + '-' + str(self.object_count) + '.bz2'
                             self.upload_zip([obj], destination_key)
@@ -274,7 +300,13 @@ class DataManager():
         with open(self.log_file, 'w'):
             pass
         self.logger('BZ2DATA Harvard Business School (2025)\n')
-
+        
+        if self.resume:
+            df = pd.read_csv(self.resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
+            resume_idx = df.where(df['ACTION'] != 'Adding:').last_valid_index()
+            self.object_count = int(df.loc[resume_idx].FILE.split('.')[0][-1]) + 1
+            Page, Id = df[['PAGE', 'ID']].iloc[resume_idx].values
+            RIDX = df.loc[Id].ID
 
         if all((self.source_bucket, self.destination_directory)):
             source_client = self.source.client('s3')
@@ -282,7 +314,13 @@ class DataManager():
 
             for pidx, page in enumerate(paginator.paginate(Bucket=self.source_bucket)):
 
+                if self.resume and pidx < Page:
+                    continue
+
                 for idx, obj in enumerate(page.get('Contents', [])):
+
+                    if self.resume and idx <= RIDX:
+                        continue
 
                     self.source_count += 1
                     self.file_size = obj['Size']
@@ -291,15 +329,13 @@ class DataManager():
                     # Zip buffer size has been exceeded
                     
                     if self.obj_size > self.zip_size:
-                        self.logger(f'Exceeded zip size: {self.obj_size}\n')
 
                         # When the file is bigger than the zip size, zip and upload the file then continue adding files to the zip buffer, same
                         # when the buffer is too small to prevent sporadic tiny zip files in the dataset.
                         
                         if self.file_size >= self.zip_size or (self.obj_size - self.file_size) < self.file_size:
-                            self.logger(f'File exceeds zip size or zip buffer is too small\n')
+
                             buff_size = self.obj_size - self.file_size
-                            self.logger(f'Object: {self.file_size} Buffer {buff_size}')
 
                             destination_key = self.zip_name + '-' + str(self.object_count) + '.bz2'
                             self.download_zip([obj], destination_key)
