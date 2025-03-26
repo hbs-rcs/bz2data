@@ -165,15 +165,38 @@ class DataManager():
             destination_client = self.destination.client('s3')
             paginator = source_client.get_paginator('list_objects_v2')
 
-            for page in paginator.paginate(Bucket=self.source_bucket):
+            for pidx, page in enumerate(paginator.paginate(Bucket=self.source_bucket)):
 
                 for idx, obj in enumerate(page.get('Contents', [])):
 
                     file_obj = source_client.get_object(Bucket=self.source_bucket, Key=obj['Key'])
                     file_content = file_obj['Body'].read()
+                    self.file_size = obj['Size']
+                    self.obj_size += self.file_size
                     destination_key = obj['Key']
-                    self.logger(f'\nUploading {destination_key}')
                     destination_client.put_object(Bucket = self.destination_bucket, Key = destination_key, Body = file_content, StorageClass = self.destination_class)
+                    self.logger(f'{pidx} {idx} ' + f'Listed: {destination_key} Size: {self.file_size} ' + f'Total: {self.obj_size}')
+
+    def getList(self):
+        if all((self.source_bucket)):
+
+            with open(self.log_file, 'w'):
+                pass
+            self.logger('BZ2DATA Harvard Business School (2025)\n')
+
+            source_client = self.source.client('s3')
+            paginator = source_client.get_paginator('list_objects_v2')
+
+            for pidx, page in enumerate(paginator.paginate(Bucket=self.source_bucket)):
+
+                for idx, obj in enumerate(page.get('Contents', [])):
+                
+                    self.source_count += 1
+                    self.file_size = obj['Size']
+                    self.obj_size += self.file_size
+                    destination_key = obj['Key']
+
+                    self.logger(f'{pidx} {idx} ' + f'Listed: {destination_key} Size: {self.file_size} ' + f'Total: {self.obj_size}')
 
     def compress(self, resume = ''):
         if all((self.source_bucket, self.destination_bucket)):
