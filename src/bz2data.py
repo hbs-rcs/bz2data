@@ -1,5 +1,8 @@
 
+from dask.distributed import Client, LocalCluster
+from multiprocessing import shared_memory
 from filelog import get_logger
+import multiprocessing
 from glob import glob
 import pandas as pd
 import zipfile
@@ -8,9 +11,28 @@ import time
 import io
 import os
 
+def get_object(file_object, key_id = '', bucket_key = '', bucket = ''):
+
+    page, idx, obj = file_object
+    file_key = obj['Key']
+    name = str(idx)
+    size = obj['Size']
+    objshm = shared_memory.SharedMemory(create = True, name = name, size=size)
+    
+    source_sess = boto3.Session(aws_access_key_id = key_id, aws_secret_access_key = bucket_key)
+    source_client = source_sess.client('s3')
+    
+    try:
+        key_obj = source_client.get_object(Bucket = bucket, Key = file_key)
+        objshm.buf[:size] = key_obj['Body'].read()
+        return True
+    except Exception as e:
+        objshm.unlink()
+        print(f'Error downloading {file_key}', e)
+
 class DataManager():
 
-    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', log_file = './bz2data.log', timeout = 0):
+    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', njobs = 1, log_file = './bz2data.log', timeout = 0):
 
         '''
 
@@ -39,22 +61,28 @@ class DataManager():
         self.page_size = ''
         self.destination_directory = ''
         self.total = 0
+        self.njobs = njobs
+        self.key_id = ''
+        self.key = ''
 
     def sourceBucket(self, key_id = '', key = '', bucket = ''):
         if all((key_id, key, bucket)):
+            self.key_id = key_id
+            self.key = key
             source_sess = boto3.Session(
                 aws_access_key_id = key_id,
                 aws_secret_access_key = key
             )
             self.source = source_sess
             self.source_bucket = bucket
+
             s3source = source_sess.resource('s3')
             source_bucket = s3source.Bucket(bucket)
 
 #           # Counting the objects can take a very long time for large datasets and there is an additional charge for listing them as well.
 #            total_objs = sum(1 for _ in source_bucket.objects.all())
 #            self.objects = total_objs
-#            total_bytes = sum([object.size for object in source_bucket.objects.all()])
+#            total_bytes = sum([obj.size for obj in source_bucket.objects.all()])
 #            self.logger(f'\nSource:\nTotal bucket size: {total_bytes/1024/1024/1024} GB\ntotal bucket objects: {total_objs}')
 
     def destinationBucket(self, key_id = '', key = '', bucket = ''):
@@ -82,82 +110,115 @@ class DataManager():
             self.destination_directory = destination_directory
         else:
             self.logger(f'The path {self.source_directory} does not exist.')
-
+    
     def generate_zip(self, files = [], save_name = ''):
-        source_client = self.source.client('s3')
-        destination_client = self.destination.client('s3')
-        zip_buffer = io.BytesIO()
+        if all((self.source_bucket, self.destination_bucket)):
+            source_client = self.source.client('s3')
+            destination_client = self.destination.client('s3')
+            zip_buffer = io.BytesIO()
 
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
-            object_size = 0
-            while files:
-                page, idx, object = files.pop(0)
-                object_size += object['Size']
-                file_obj = source_client.get_object(Bucket = self.source_bucket, Key = object['Key'])
-                file_content = file_obj['Body'].read()
-                object_path, size = object['Key'], object['Size']
-                self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {object_size}')
-                zip_file.writestr(object['Key'], file_content, compress_type = zipfile.ZIP_BZIP2)
-            zip_file.close()
+            cluster = LocalCluster(name='dask-cluster', n_workers = self.njobs, threads_per_worker = 1, scheduler_port = 0, dashboard_address = ':8787')
+            client = Client(cluster)
+            futures = client.map(get_object, files, key_id = self.key_id, bucket_key = self.key, bucket = self.source_bucket)
+            results = client.gather(iter(futures))
+            
+            rlist = []
+            for result in results:
+                rlist.append(result)
 
-        zip_buffer.seek(0)
-        buffer_size = zip_buffer.getbuffer().nbytes
-        destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
-        self.total += buffer_size
-        self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.total}')
+            client.close(), cluster.close()
+            
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
+                
+                while files:
+                    page, idx, obj = files.pop(0)
+                    object_path, size = obj['Key'], obj['Size']
+                    name = str(idx)
+                    shm = shared_memory.SharedMemory(name=name)
+                    self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
+                    zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
+                    shm.close()
+                    shm.unlink()
+                zip_file.close()
 
-        time.sleep(self.timeout) if self.timeout else None
+            zip_buffer.seek(0)
+            buffer_size = zip_buffer.getbuffer().nbytes
+            destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
+            self.total += buffer_size
+            self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.total}')
+
+            time.sleep(self.timeout) if self.timeout else None
+        else:
+            raise ExceptionType('Error source bucket and destination bucket are needed to compress')
 
     def upload_zip(self, files = [], save_name = ''):
-        destination_client = self.destination.client('s3')
-        zip_buffer = io.BytesIO()
+        if all((self.source_directory, self.destination_bucket)):
+            destination_client = self.destination.client('s3')
+            zip_buffer = io.BytesIO()
 
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
-            object_size = 0
-            while files:
-                page, idx, object = files.pop(0)
-                size = os.path.getsize(object)
-                object_size += size
-                file_descriptor = os.open(object, os.O_RDONLY)
-                file_content = os.read(file_descriptor, size)
-                os.close(file_descriptor)
-                self.logger(f'{page} {idx} ' + f'Adding: {object} Size: {size} ' + f'Total: {object_size}')
-                zip_file.writestr(object, file_content, compress_type = zipfile.ZIP_BZIP2)
-            zip_file.close()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
+                object_size = 0
+                while files:
+                    page, idx, obj = files.pop(0)
+                    size = os.path.getsize(object)
+                    object_size += size
+                    file_descriptor = os.open(obj, os.O_RDONLY)
+                    file_content = os.read(file_descriptor, size)
+                    os.close(file_descriptor)
+                    self.logger(f'{page} {idx} ' + f'Adding: {obj} Size: {size} ' + f'Total: {object_size}')
+                    zip_file.writestr(obj, file_content, compress_type = zipfile.ZIP_BZIP2)
+                zip_file.close()
 
-        zip_buffer.seek(0)
-        buffer_size = zip_buffer.getbuffer().nbytes
-        destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
-        self.total += buffer_size
-        self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.total}')
+            zip_buffer.seek(0)
+            buffer_size = zip_buffer.getbuffer().nbytes
+            destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
+            self.total += buffer_size
+            self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.total}')
 
-        time.sleep(self.timeout) if self.timeout else None
+            time.sleep(self.timeout) if self.timeout else None
+        else:
+            raise ExceptionType('Error source directory and destination bucket are needed to upload')
 
     def download_zip(self, files = [], save_name = ''):
-        source_client = self.source.client('s3')
-        zip_buffer = io.BytesIO()
+        if all((self.source_bucket, self.destination_directory)):
+            source_client = self.source.client('s3')
+            zip_buffer = io.BytesIO()
 
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
-            object_size = 0
-            while files:
-                page, idx, object = files.pop(0)
-                object_size += object['Size']
-                file_obj = source_client.get_object(Bucket = self.source_bucket, Key = object['Key'])
-                file_content = file_obj['Body'].read()
-                object_path, size = object['Key'], object['Size']
-                self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {object_size}')
-                zip_file.writestr(object['Key'], file_content, compress_type = zipfile.ZIP_BZIP2)
-            zip_file.close()
+            cluster = LocalCluster(name='dask-cluster', n_workers = self.njobs, threads_per_worker = 1, scheduler_port = 0, dashboard_address = ':8787')
+            client = Client(cluster)
+            futures = client.map(get_object, files, key_id = self.key_id, bucket_key = self.key, bucket = self.source_bucket)
+            results = client.gather(iter(futures))
 
-        zip_buffer.seek(0)
-        buffer_size = zip_buffer.getbuffer().nbytes
-        destination_name = os.path.join(self.destination_directory, save_name)
-        with open(destination_name, 'wb') as fd:
-            fd.write(zip_buffer.getvalue())
-        self.total += buffer_size
-        self.logger(f'{page} {idx} ' + f'Downloaded: {destination_name} Size: {buffer_size} ' + f'Total: {self.total}')
+            rlist = []
+            for result in results:
+                rlist.append(result)
 
-        time.sleep(self.timeout) if self.timeout else None
+            client.close(), cluster.close()
+
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
+                
+                while files:
+                    page, idx, obj = files.pop(0)
+                    object_path, size = obj['Key'], obj['Size']
+                    name = str(idx)
+                    shm = shared_memory.SharedMemory(name=name)
+                    self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
+                    zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
+                    shm.close()
+                    shm.unlink()
+                zip_file.close()
+
+            zip_buffer.seek(0)
+            buffer_size = zip_buffer.getbuffer().nbytes
+            destination_name = os.path.join(self.destination_directory, save_name)
+            with open(destination_name, 'wb') as fd:
+                fd.write(zip_buffer.getvalue())
+            self.total += buffer_size
+            self.logger(f'{page} {idx} ' + f'Downloaded: {destination_name} Size: {buffer_size} ' + f'Total: {self.total}')
+
+            time.sleep(self.timeout) if self.timeout else None
+        else:
+            raise ExceptionType('Error source bucket and destination directory are needed to download')
 
     def transfer(self):
         if all((self.source_bucket, self.destination_bucket)):
@@ -178,8 +239,9 @@ class DataManager():
                     self.logger(f'{pidx} {idx} ' + f'Listed: {destination_key} Size: {self.file_size} ' + f'Total: {self.obj_size}')
 
     def getList(self):
-        if all((self.source_bucket)):
+        if self.source_bucket:
 
+            # Clear log file
             with open(self.log_file, 'w'):
                 pass
             self.logger('BZ2DATA Harvard Business School (2025)\n')
@@ -198,126 +260,7 @@ class DataManager():
 
                     self.logger(f'{pidx} {idx} ' + f'Listed: {destination_key} Size: {self.file_size} ' + f'Total: {self.obj_size}')
 
-    def compress(self, resume = ''):
-        if all((self.source_bucket, self.destination_bucket)):
-
-            with open(self.log_file, 'w'):
-                pass
-            self.logger('BZ2DATA Harvard Business School (2025)\n')
-            
-            if resume:
-                df = pd.read_csv(resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
-                resume_idx = df.where(df['ACTION'] != 'Adding:').last_valid_index()
-                self.object_count = int(df.loc[resume_idx].FILE.split('.')[0][-1]) + 1
-                Page, Id = df[['PAGE', 'ID']].iloc[resume_idx].values
-                RIDX = df.loc[Id].ID
-
-            source_client = self.source.client('s3')
-            paginator = source_client.get_paginator('list_objects_v2')
-
-            for pidx, page in enumerate(paginator.paginate(Bucket=self.source_bucket)):
-            
-                if resume and pidx < Page:
-                    continue
-
-                for idx, obj in enumerate(page.get('Contents', [])):
-                
-                    if resume and idx <= RIDX:
-                        continue
-
-                    self.source_count += 1
-                    self.file_size = obj['Size']
-                    self.obj_size += self.file_size
-
-                    # Zip buffer size has been exceeded
-
-                    if self.obj_size > self.zip_size:
-
-                        # When the file is bigger than the zip size, zip and upload the file then continue adding files to the zip buffer, same
-                        # when the buffer is too small to prevent sporadic tiny zip files in the dataset.
-                        
-                        if self.file_size >= self.zip_size or (self.obj_size - self.file_size) < self.file_size:
-
-                            buff_size = self.obj_size - self.file_size
-
-                            destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
-                            self.generate_zip([obj], destination_key)
-                            self.object_count += 1
-                            self.obj_size = self.obj_size - self.file_size
-                            continue
-
-                        destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
-                        self.generate_zip(self.zip_list, destination_key)
-                        self.object_count += 1
-                        self.obj_size = self.file_size
-
-                    self.zip_list.append((pidx, idx, obj))
-
-            destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
-            self.generate_zip(self.zip_list, destination_key)
-            self.object_count += 1
-
-    def upload(self, resume = ''):
-        if all((self.source_directory, self.destination_bucket)):
-
-            with open(self.log_file, 'w'):
-                pass
-            self.logger('BZ2DATA Harvard Business School (2025)\n')
-
-            if resume:
-                df = pd.read_csv(resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
-                resume_idx = df.where(df['ACTION'] != 'Adding:').last_valid_index()
-                self.object_count = int(df.loc[resume_idx].FILE.split('.')[0][-1]) + 1
-                Page, Id = df[['PAGE', 'ID']].iloc[resume_idx].values
-                RIDX = df.loc[Id].ID
-
-            all_files = glob(f'{self.source_directory}/**/*.*', recursive=True)
-
-            for pidx, page in enumerate(range(0, len(all_files), self.page_size)):
-            
-                if resume and pidx < Page:
-                    continue
-
-                page_list = all_files[page: page + self.page_size]
-                
-                for idx, obj in enumerate(page_list):
-
-                    if resume and idx <= RIDX:
-                        continue
-
-                    self.source_count += 1
-                    self.file_size = os.path.getsize(obj)
-                    self.obj_size += self.file_size
-
-                    # Zip buffer size has been exceeded
-
-                    if self.obj_size > self.zip_size:
-
-                        # When the file is bigger than the zip size, zip and upload the file then continue adding files to the zip buffer, same
-                        # when the buffer is too small to prevent sporadic tiny zip files in the dataset.
-
-                        if self.file_size >= self.zip_size or (self.obj_size - self.file_size) < self.file_size:
-                        
-                            buff_size = self.obj_size - self.file_size
-
-                            destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
-                            self.upload_zip([obj], destination_key)
-                            self.object_count += 1
-                            self.obj_size = self.obj_size - self.file_size
-                            continue
-
-                        destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
-                        self.upload_zip(self.zip_list, destination_key)
-                        self.object_count += 1
-                        self.obj_size = self.file_size
-
-                    self.zip_list.append((pidx, idx, obj))
-                    
-            destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
-            self.upload_zip(self.zip_list, destination_key)
-            self.object_count += 1
-
-    def download(self, resume = ''):
+    def compress(self, action, resume = ''):
 
         with open(self.log_file, 'w'):
             pass
@@ -330,49 +273,77 @@ class DataManager():
             Page, Id = df[['PAGE', 'ID']].iloc[resume_idx].values
             RIDX = df.loc[Id].ID
 
-        if all((self.source_bucket, self.destination_directory)):
-            source_client = self.source.client('s3')
-            paginator = source_client.get_paginator('list_objects_v2')
-
-            for pidx, page in enumerate(paginator.paginate(Bucket=self.source_bucket)):
+        source_t = (self.source_bucket, self.source_directory)
+        destination_t = (self.destination_bucket, self.destination_directory)
+        
+        if any(source_t) and any(destination_t):
+        
+            match action:
+                case 'upload':
+                    all_files = glob(f'{self.source_directory}/**/*.*', recursive=True)
+                    zip_function = self.upload_zip
+                    all_pages = range(0, len(all_files), self.page_size)
+                case 'download':
+                    source_client = self.source.client('s3')
+                    paginator = source_client.get_paginator('list_objects_v2')
+                    zip_function = self.download_zip
+                    all_pages = paginator.paginate(Bucket=self.source_bucket)
+                case 'compress':
+                    source_client = self.source.client('s3')
+                    paginator = source_client.get_paginator('list_objects_v2')
+                    zip_function = self.generate_zip
+                    all_pages = paginator.paginate(Bucket=self.source_bucket)
+            
+            for pidx, page in enumerate(all_pages):
 
                 if resume and pidx < Page:
                     continue
-
-                for idx, obj in enumerate(page.get('Contents', [])):
+                    
+                match action:
+                    case 'upload':
+                        page_list = all_files[page: page + self.page_size]
+                    case _:
+                        page_list = page.get('Contents', [])
+                        
+                for idx, obj in enumerate(page_list):
 
                     if resume and idx <= RIDX:
                         continue
-
+                    
+                    match action:
+                        case 'upload':
+                            self.file_size = os.path.getsize(obj)
+                        case _:
+                            self.file_size = obj['Size']
+                    
                     self.source_count += 1
-                    self.file_size = obj['Size']
                     self.obj_size += self.file_size
 
                     # Zip buffer size has been exceeded
-                    
                     if self.obj_size > self.zip_size:
 
                         # When the file is bigger than the zip size, zip and upload the file then continue adding files to the zip buffer, same
-                        # when the buffer is too small to prevent sporadic tiny zip files in the dataset.
-                        
+                        # when buffer is too small to prevent sporadic tiny zip files in the dataset.
                         if self.file_size >= self.zip_size or (self.obj_size - self.file_size) < self.file_size:
 
                             buff_size = self.obj_size - self.file_size
 
                             destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
-                            self.download_zip([obj], destination_key)
+                            self.obj_size -= self.file_size
+                            zip_function([obj], destination_key)
                             self.object_count += 1
-                            self.obj_size = self.obj_size - self.file_size
                             continue
 
                         destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
-                        self.download_zip(self.zip_list, destination_key)
+                        self.object_size -= self.file_size
+                        zip_function(self.zip_list, destination_key)
                         self.object_count += 1
                         self.obj_size = self.file_size
 
                     self.zip_list.append((pidx, idx, obj))
 
             destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
-            self.download_zip(self.zip_list, destination_key)
+            zip_function(self.zip_list, destination_key)
             self.object_count += 1
-
+            self.object_size = 0
+            
