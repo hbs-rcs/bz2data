@@ -2,7 +2,6 @@
 from dask.distributed import Client, LocalCluster
 from multiprocessing import shared_memory
 from filelog import get_logger
-import multiprocessing
 from glob import glob
 import pandas as pd
 import zipfile
@@ -76,10 +75,9 @@ class DataManager():
             self.source = source_sess
             self.source_bucket = bucket
 
-            s3source = source_sess.resource('s3')
-            source_bucket = s3source.Bucket(bucket)
-
 #           # Counting the objects can take a very long time for large datasets and there is an additional charge for listing them as well.
+#            s3source = source_sess.resource('s3')
+#            source_bucket = s3source.Bucket(bucket)
 #            total_objs = sum(1 for _ in source_bucket.objects.all())
 #            self.objects = total_objs
 #            total_bytes = sum([obj.size for obj in source_bucket.objects.all()])
@@ -93,8 +91,6 @@ class DataManager():
             )
             self.destination = dest_sess
             self.destination_bucket = bucket
-            s3destination = dest_sess.resource('s3')
-            destination_bucket = s3destination.Bucket(bucket)
 
     def sourcePath(self, source_directory = '', page_size = 1000):
 
@@ -113,7 +109,6 @@ class DataManager():
     
     def generate_zip(self, files = [], save_name = ''):
         if all((self.source_bucket, self.destination_bucket)):
-            source_client = self.source.client('s3')
             destination_client = self.destination.client('s3')
             zip_buffer = io.BytesIO()
 
@@ -149,7 +144,7 @@ class DataManager():
 
             time.sleep(self.timeout) if self.timeout else None
         else:
-            raise ExceptionType('Error source bucket and destination bucket are needed to compress')
+            print('Error source bucket and destination bucket are needed to compress')
 
     def upload_zip(self, files = [], save_name = ''):
         if all((self.source_directory, self.destination_bucket)):
@@ -177,11 +172,10 @@ class DataManager():
 
             time.sleep(self.timeout) if self.timeout else None
         else:
-            raise ExceptionType('Error source directory and destination bucket are needed to upload')
+            print('Error source directory and destination bucket are needed to upload')
 
     def download_zip(self, files = [], save_name = ''):
         if all((self.source_bucket, self.destination_directory)):
-            source_client = self.source.client('s3')
             zip_buffer = io.BytesIO()
 
             cluster = LocalCluster(name='dask-cluster', n_workers = self.njobs, threads_per_worker = 1, scheduler_port = 0, dashboard_address = ':8787')
@@ -218,7 +212,7 @@ class DataManager():
 
             time.sleep(self.timeout) if self.timeout else None
         else:
-            raise ExceptionType('Error source bucket and destination directory are needed to download')
+            print('Error source bucket and destination directory are needed to download')
 
     def transfer(self):
         if all((self.source_bucket, self.destination_bucket)):
@@ -325,8 +319,6 @@ class DataManager():
                         # When the file is bigger than the zip size, zip and upload the file then continue adding files to the zip buffer, same
                         # when buffer is too small to prevent sporadic tiny zip files in the dataset.
                         if self.file_size >= self.zip_size or (self.obj_size - self.file_size) < self.file_size:
-
-                            buff_size = self.obj_size - self.file_size
 
                             destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
                             self.obj_size -= self.file_size
