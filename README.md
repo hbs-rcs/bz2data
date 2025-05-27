@@ -45,7 +45,7 @@ Usage:
 
     data_manager.destinationBucket(dest_key_id, dest_key, destination_bucket)
 
-    data_manager.compress()
+    data_manager.compress('compress')
 
 
 Info:
@@ -61,6 +61,8 @@ Change destination bucket storage class (default: 'STANDARD')
     S3 storage classes:
 
     'STANDARD'|'REDUCED_REDUNDANCY'|'STANDARD_IA'|'ONEZONE_IA'|'INTELLIGENT_TIERING'|'GLACIER'|'DEEP_ARCHIVE'|'OUTPOSTS'|'GLACIER_IR'|'SNOW'|'EXPRESS_ONEZONE'
+    
+    Only STANDARD and STANDARD_IA have been tested, other classes like GLACIER will require additional code
  
 Destination zip file names will have a count digit appended to the 
 string passed as the 'archive_names' parameter for each zip archive created when 
@@ -74,9 +76,9 @@ Upload and compress from disk
     
     data_manager.sourcePath('Desktop/unzipped')
 
-    data_manager.destinationBucket(key_id_2, key_2, destination_bucket)
+    data_manager.destinationBucket(dest_key_id, dest_key, destination_bucket)
 
-    data_manager.upload()
+    data_manager.compress('upload')
 
 Download and compress to disk
 
@@ -84,9 +86,9 @@ Download and compress to disk
     
     data_manager.destinationPath('Desktop/zipped')
 
-    data_manager.sourceBucket(key_id_1, key_1, source_bucket)
+    data_manager.sourceBucket(src_key_id, src_key, source_bucket)
 
-    data_manager.download()
+    data_manager.compress('download')
 
 Resume transfer
 
@@ -94,7 +96,7 @@ Resume transfer
     
     data_manager = bz2data.DataManager(archive_names = names, log_file = './new-bz2data.log')
     
-    data_manager.compress(resume = './bz2data.log')
+    data_manager.compress('compress', resume = './bz2data.log')
 
 Extract using command line
 
