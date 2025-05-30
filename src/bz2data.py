@@ -14,7 +14,7 @@ def get_object(file_object, key_id = '', bucket_key = '', bucket = ''):
 
     page, idx, obj = file_object
     file_key = obj['Key']
-    name = str(idx)
+    name = f'{page}-{idx}'
     size = obj['Size']
     objshm = shared_memory.SharedMemory(create = True, name = name, size=size)
     
@@ -57,7 +57,7 @@ class DataManager():
         self.zip_list = []
         self.timeout = timeout
         self.source_directory = ''
-        self.page_size = ''
+        self.page_size = 1000
         self.destination_directory = ''
         self.total = 0
         self.njobs = njobs
@@ -128,7 +128,7 @@ class DataManager():
                 while files:
                     page, idx, obj = files.pop(0)
                     object_path, size = obj['Key'], obj['Size']
-                    name = str(idx)
+                    name = f'{page}-{idx}'
                     shm = shared_memory.SharedMemory(name=name)
                     self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
                     zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
@@ -194,7 +194,7 @@ class DataManager():
                 while files:
                     page, idx, obj = files.pop(0)
                     object_path, size = obj['Key'], obj['Size']
-                    name = str(idx)
+                    name = f'{page}-{idx}'
                     shm = shared_memory.SharedMemory(name=name)
                     self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
                     zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
@@ -254,7 +254,7 @@ class DataManager():
 
                     self.logger(f'{pidx} {idx} ' + f'Listed: {destination_key} Size: {self.file_size} ' + f'Total: {self.obj_size}')
 
-    def compress(self, action, resume = ''):
+    def compress(self, action, resume = '', inventory = ''):
 
         with open(self.log_file, 'w'):
             pass
@@ -274,20 +274,30 @@ class DataManager():
         
             match action:
                 case 'upload':
-                    all_files = glob(f'{self.source_directory}/**/*.*', recursive=True)
                     zip_function = self.upload_zip
+                    all_files = glob(f'{self.source_directory}/**/*.*', recursive=True)
                     all_pages = range(0, len(all_files), self.page_size)
                 case 'download':
-                    source_client = self.source.client('s3')
-                    paginator = source_client.get_paginator('list_objects_v2')
                     zip_function = self.download_zip
-                    all_pages = paginator.paginate(Bucket=self.source_bucket)
+                    if inventory:
+                        all_csvs = glob(f'{inventory}/**/*.csv', recursive=True)
+                        all_files = pd.concat([pd.read_csv(csv_file, header=None, names=['Bucket', 'Key', 'Size'], low_memory=False) for csv_file in all_csvs])
+                        all_pages = range(0, len(all_files), self.page_size)
+                    else:
+                        source_client = self.source.client('s3')
+                        paginator = source_client.get_paginator('list_objects_v2')
+                        all_pages = paginator.paginate(Bucket=self.source_bucket)
                 case 'compress':
-                    source_client = self.source.client('s3')
-                    paginator = source_client.get_paginator('list_objects_v2')
                     zip_function = self.generate_zip
-                    all_pages = paginator.paginate(Bucket=self.source_bucket)
-            
+                    if inventory:
+                        all_csvs = glob(f'{inventory}/**/*.csv', recursive=True)
+                        all_files = pd.concat([pd.read_csv(csv_file, header=None, names=['Bucket', 'Key', 'Size'], low_memory=False) for csv_file in all_csvs])
+                        all_pages = range(0, len(all_files), self.page_size)
+                    else:
+                        source_client = self.source.client('s3')
+                        paginator = source_client.get_paginator('list_objects_v2')
+                        all_pages = paginator.paginate(Bucket=self.source_bucket)
+
             for pidx, page in enumerate(all_pages):
 
                 if resume and pidx < Page:
@@ -297,7 +307,10 @@ class DataManager():
                     case 'upload':
                         page_list = all_files[page: page + self.page_size]
                     case _:
-                        page_list = page.get('Contents', [])
+                        if inventory:
+                            page_list = all_files[page: page + self.page_size].iterrows()
+                        else:
+                            page_list = page.get('Contents', [])
                         
                 for idx, obj in enumerate(page_list):
 
@@ -308,7 +321,11 @@ class DataManager():
                         case 'upload':
                             self.file_size = os.path.getsize(obj)
                         case _:
-                            self.file_size = obj['Size']
+                            if inventory:
+                                obj = obj[1]
+                                file_size = obj['Size']
+                            else:
+                                self.file_size = obj['Size']
                     
                     self.source_count += 1
                     self.obj_size += self.file_size
@@ -316,8 +333,8 @@ class DataManager():
                     # Zip buffer size has been exceeded
                     if self.obj_size > self.zip_size:
 
-                        # When the file is bigger than the zip size, zip and upload the file then continue adding files to the zip buffer, same
-                        # when buffer is too small to prevent sporadic tiny zip files in the dataset.
+                        # When the buffer is bigger than the zip size, zip and upload the buffer then continue adding files to a new zip buffer, the opposite
+                        # when buffer is too small and the latest object added was too big to prevent sporadic tiny zip files in the dataset.
                         if self.file_size >= self.zip_size or (self.obj_size - self.file_size) < self.file_size:
 
                             destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
@@ -339,3 +356,5 @@ class DataManager():
             self.object_count += 1
             self.object_size = 0
             
+        else:
+            print('Source and Destination bucket or path required')
