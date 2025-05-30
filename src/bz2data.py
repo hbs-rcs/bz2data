@@ -10,7 +10,7 @@ import time
 import io
 import os
 
-def get_object(file_object, key_id = '', bucket_key = '', bucket = ''):
+def get_object(file_object, key_id = '', bucket_key = '', bucket = '', error_log = ''):
 
     page, idx, obj = file_object
     file_key = obj['Key']
@@ -25,13 +25,16 @@ def get_object(file_object, key_id = '', bucket_key = '', bucket = ''):
         key_obj = source_client.get_object(Bucket = bucket, Key = file_key)
         objshm.buf[:size] = key_obj['Body'].read()
         return True
-    except Exception as e:
+    except:
         objshm.unlink()
-        print(f'Error downloading {file_key}', e)
+
+        with open(error_log, 'a') as error_file:
+            loggerr = get_logger(level = 'ERROR', log_file = error_log)
+            loggerr(f'Error downloading {file_key}')
 
 class DataManager():
 
-    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', njobs = 1, log_file = './bz2data.log', timeout = 0):
+    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', njobs = 1, log_file = './bz2data.log', error_log = './bz2data-error.log', timeout = 0):
 
         '''
 
@@ -42,6 +45,7 @@ class DataManager():
 
         self.log_file = log_file
         self.logger = get_logger(level = 'INFO', log_file = self.log_file)
+        self.error_log = error_log
         self.zip_name = archive_names
         self.zip_size = zip_size
         self.source = boto3.Session
@@ -107,14 +111,14 @@ class DataManager():
         else:
             self.logger(f'The path {self.source_directory} does not exist.')
     
-    def generate_zip(self, files = [], save_name = ''):
+    def generate_zip(self, files = [], save_name = '', error_log = ''):
         if all((self.source_bucket, self.destination_bucket)):
             destination_client = self.destination.client('s3')
             zip_buffer = io.BytesIO()
 
             cluster = LocalCluster(name='dask-cluster', n_workers = self.njobs, threads_per_worker = 1, scheduler_port = 0, dashboard_address = ':8787')
             client = Client(cluster)
-            futures = client.map(get_object, files, key_id = self.key_id, bucket_key = self.key, bucket = self.source_bucket)
+            futures = client.map(get_object, files, key_id = self.key_id, bucket_key = self.key, bucket = self.source_bucket, error_log = error_log)
             results = client.gather(iter(futures))
             
             rlist = []
@@ -123,26 +127,29 @@ class DataManager():
 
             client.close(), cluster.close()
             
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
-                
-                while files:
-                    page, idx, obj = files.pop(0)
-                    object_path, size = obj['Key'], obj['Size']
-                    name = f'{page}-{idx}'
-                    shm = shared_memory.SharedMemory(name=name)
-                    self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
-                    zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
-                    shm.close()
-                    shm.unlink()
-                zip_file.close()
+            try:
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
+                    
+                    while files:
+                        page, idx, obj = files.pop(0)
+                        object_path, size = obj['Key'], obj['Size']
+                        name = f'{page}-{idx}'
+                        shm = shared_memory.SharedMemory(name=name)
+                        self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
+                        zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
+                        shm.close()
+                        shm.unlink()
+                    zip_file.close()
 
-            zip_buffer.seek(0)
-            buffer_size = zip_buffer.getbuffer().nbytes
-            destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
-            self.total += buffer_size
-            self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.total}')
+                zip_buffer.seek(0)
+                buffer_size = zip_buffer.getbuffer().nbytes
+                destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
+                self.total += buffer_size
+                self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.total}')
 
-            time.sleep(self.timeout) if self.timeout else None
+                time.sleep(self.timeout) if self.timeout else None
+            except:
+                pass
         else:
             print('Error source bucket and destination bucket are needed to compress')
 
@@ -174,13 +181,13 @@ class DataManager():
         else:
             print('Error source directory and destination bucket are needed to upload')
 
-    def download_zip(self, files = [], save_name = ''):
+    def download_zip(self, files = [], save_name = '', error_log = ''):
         if all((self.source_bucket, self.destination_directory)):
             zip_buffer = io.BytesIO()
 
             cluster = LocalCluster(name='dask-cluster', n_workers = self.njobs, threads_per_worker = 1, scheduler_port = 0, dashboard_address = ':8787')
             client = Client(cluster)
-            futures = client.map(get_object, files, key_id = self.key_id, bucket_key = self.key, bucket = self.source_bucket)
+            futures = client.map(get_object, files, key_id = self.key_id, bucket_key = self.key, bucket = self.source_bucket, error_log = error_log)
             results = client.gather(iter(futures))
 
             rlist = []
@@ -189,28 +196,31 @@ class DataManager():
 
             client.close(), cluster.close()
 
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
-                
-                while files:
-                    page, idx, obj = files.pop(0)
-                    object_path, size = obj['Key'], obj['Size']
-                    name = f'{page}-{idx}'
-                    shm = shared_memory.SharedMemory(name=name)
-                    self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
-                    zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
-                    shm.close()
-                    shm.unlink()
-                zip_file.close()
+            try:
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
+                    
+                    while files:
+                        page, idx, obj = files.pop(0)
+                        object_path, size = obj['Key'], obj['Size']
+                        name = f'{page}-{idx}'
+                        shm = shared_memory.SharedMemory(name=name)
+                        self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
+                        zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
+                        shm.close()
+                        shm.unlink()
+                    zip_file.close()
 
-            zip_buffer.seek(0)
-            buffer_size = zip_buffer.getbuffer().nbytes
-            destination_name = os.path.join(self.destination_directory, save_name)
-            with open(destination_name, 'wb') as fd:
-                fd.write(zip_buffer.getvalue())
-            self.total += buffer_size
-            self.logger(f'{page} {idx} ' + f'Downloaded: {destination_name} Size: {buffer_size} ' + f'Total: {self.total}')
+                zip_buffer.seek(0)
+                buffer_size = zip_buffer.getbuffer().nbytes
+                destination_name = os.path.join(self.destination_directory, save_name)
+                with open(destination_name, 'wb') as fd:
+                    fd.write(zip_buffer.getvalue())
+                self.total += buffer_size
+                self.logger(f'{page} {idx} ' + f'Downloaded: {destination_name} Size: {buffer_size} ' + f'Total: {self.total}')
 
-            time.sleep(self.timeout) if self.timeout else None
+                time.sleep(self.timeout) if self.timeout else None
+            except:
+                pass
         else:
             print('Error source bucket and destination directory are needed to download')
 
@@ -339,22 +349,25 @@ class DataManager():
 
                             destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
                             self.obj_size -= self.file_size
-                            zip_function([obj], destination_key)
+                            error_log = self.error_log
+                            zip_function([obj], destination_key, error_log = error_log)
                             self.object_count += 1
                             continue
 
                         destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
                         self.object_size -= self.file_size
-                        zip_function(self.zip_list, destination_key)
+                        error_log = self.error_log
+                        zip_function(self.zip_list, destination_key, error_log = error_log)
                         self.object_count += 1
                         self.obj_size = self.file_size
 
                     self.zip_list.append((pidx, idx, obj))
 
             destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
-            zip_function(self.zip_list, destination_key)
+            error_log = self.error_log
+            zip_function(self.zip_list, destination_key, error_log = error_log)
             self.object_count += 1
             self.object_size = 0
             
         else:
-            print('Source and Destination bucket or path required')
+            self.logger('Source and Destination bucket or path required')
