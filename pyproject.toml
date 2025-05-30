@@ -4,7 +4,6 @@ requires = [
     "boto3",
     "dask",
     "distributed",
-    "multiprocessing",
     "pandas"
 ]
 build-backend = "setuptools.build_meta"
