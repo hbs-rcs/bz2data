@@ -10,9 +10,10 @@ import time
 import io
 import os
 
-def get_object(file_object, key_id = '', bucket_key = '', bucket = '', error_log = ''):
+def get_object(obj, key_id = '', bucket_key = '', bucket = '', error_log = ''):
 
-    page, idx, obj = file_object
+    page = obj['Page']
+    idx = obj['Index']
     file_key = obj['Key']
     name = f'{page}-{idx}'
     size = obj['Size']
@@ -46,6 +47,7 @@ class DataManager():
         self.log_file = log_file
         self.logger = get_logger(level = 'INFO', log_file = self.log_file)
         self.error_log = error_log
+        self.log_count = 0
         self.zip_name = archive_names
         self.zip_size = zip_size
         self.source = boto3.Session
@@ -67,6 +69,9 @@ class DataManager():
         self.njobs = njobs
         self.key_id = ''
         self.key = ''
+        self.cluster = LocalCluster(name='bz2data-dask-cluster', n_workers = self.njobs, threads_per_worker = 1, scheduler_port = 0, dashboard_address = ':8787')
+        self.client = Client(self.cluster)
+
 
     def sourceBucket(self, key_id = '', key = '', bucket = ''):
         if all((key_id, key, bucket)):
@@ -110,28 +115,32 @@ class DataManager():
             self.destination_directory = destination_directory
         else:
             self.logger(f'The path {self.source_directory} does not exist.')
-    
+
     def generate_zip(self, files = [], save_name = '', error_log = ''):
         if all((self.source_bucket, self.destination_bucket)):
             destination_client = self.destination.client('s3')
             zip_buffer = io.BytesIO()
 
-            cluster = LocalCluster(name='dask-cluster', n_workers = self.njobs, threads_per_worker = 1, scheduler_port = 0, dashboard_address = ':8787')
-            client = Client(cluster)
-            futures = client.map(get_object, files, key_id = self.key_id, bucket_key = self.key, bucket = self.source_bucket, error_log = error_log)
-            results = client.gather(iter(futures))
-            
-            rlist = []
-            for result in results:
-                rlist.append(result)
+            futures = self.client.map(get_object, files, key_id = self.key_id, bucket_key = self.key, bucket = self.source_bucket, error_log = error_log)
+            results = self.client.gather(iter(futures))
 
-            client.close(), cluster.close()
-            
+            # Need to iterate over results to finish processing
+            for result in results:
+                result
+                
+            if os.path.getsize(log_file) > (self.zip_size * 3):
+                os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
+                with open(self.log_file, 'w'):
+                    pass
+                self.logger('BZ2DATA Harvard Business School (2025)\n')
+                
             try:
                 with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
                     
                     while files:
-                        page, idx, obj = files.pop(0)
+                        obj = files.pop(0)
+                        page = obj['Page']
+                        idx = obj['Index']
                         object_path, size = obj['Key'], obj['Size']
                         name = f'{page}-{idx}'
                         shm = shared_memory.SharedMemory(name=name)
@@ -185,22 +194,26 @@ class DataManager():
         if all((self.source_bucket, self.destination_directory)):
             zip_buffer = io.BytesIO()
 
-            cluster = LocalCluster(name='dask-cluster', n_workers = self.njobs, threads_per_worker = 1, scheduler_port = 0, dashboard_address = ':8787')
-            client = Client(cluster)
-            futures = client.map(get_object, files, key_id = self.key_id, bucket_key = self.key, bucket = self.source_bucket, error_log = error_log)
-            results = client.gather(iter(futures))
+            futures = self.client.map(get_object, files, key_id = self.key_id, bucket_key = self.key, bucket = self.source_bucket, error_log = error_log)
+            results = self.client.gather(iter(futures))
 
             rlist = []
             for result in results:
                 rlist.append(result)
 
-            client.close(), cluster.close()
+            if os.path.getsize(log_file) > (self.zip_size * 3):
+                os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
+                with open(self.log_file, 'w'):
+                    pass
+                self.logger('BZ2DATA Harvard Business School (2025)\n')
 
             try:
                 with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
                     
                     while files:
-                        page, idx, obj = files.pop(0)
+                        obj = files.pop(0)
+                        page = obj['Page']
+                        idx = obj['Index']
                         object_path, size = obj['Key'], obj['Size']
                         name = f'{page}-{idx}'
                         shm = shared_memory.SharedMemory(name=name)
@@ -290,8 +303,7 @@ class DataManager():
                 case 'download':
                     zip_function = self.download_zip
                     if inventory:
-                        all_csvs = glob(f'{inventory}/**/*.csv', recursive=True)
-                        all_files = pd.concat([pd.read_csv(csv_file, header=None, names=['Bucket', 'Key', 'Size'], low_memory=False) for csv_file in all_csvs])
+                        all_files = pd.read_csv(inventory, header=None, names=['Bucket', 'Key', 'Size'], low_memory=False)
                         all_pages = range(0, len(all_files), self.page_size)
                     else:
                         source_client = self.source.client('s3')
@@ -300,8 +312,7 @@ class DataManager():
                 case 'compress':
                     zip_function = self.generate_zip
                     if inventory:
-                        all_csvs = glob(f'{inventory}/**/*.csv', recursive=True)
-                        all_files = pd.concat([pd.read_csv(csv_file, header=None, names=['Bucket', 'Key', 'Size'], low_memory=False) for csv_file in all_csvs])
+                        all_files = pd.read_csv(inventory, header=None, names=['Bucket', 'Key', 'Size'], low_memory=False)
                         all_pages = range(0, len(all_files), self.page_size)
                     else:
                         source_client = self.source.client('s3')
@@ -332,11 +343,10 @@ class DataManager():
                             self.file_size = os.path.getsize(obj)
                         case _:
                             if inventory:
-                                obj = obj[1]
-                                file_size = obj['Size']
+                                obj = {'Key': obj[1]['Key'], 'Size': obj[1]['Size'], 'Index': idx, 'Page': pidx}
                             else:
-                                self.file_size = obj['Size']
-                    
+                                obj = {'Key': obj['Key'], 'Size': obj['Size'], 'Index': idx, 'Page': pidx}
+
                     self.source_count += 1
                     self.obj_size += self.file_size
 
@@ -361,7 +371,7 @@ class DataManager():
                         self.object_count += 1
                         self.obj_size = self.file_size
 
-                    self.zip_list.append((pidx, idx, obj))
+                    self.zip_list.append(obj)
 
             destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
             error_log = self.error_log
@@ -369,5 +379,6 @@ class DataManager():
             self.object_count += 1
             self.object_size = 0
             
+            self.client.close(), self.cluster.close()
         else:
             self.logger('Source and Destination bucket or path required')
