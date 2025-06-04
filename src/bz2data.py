@@ -2,6 +2,7 @@
 from dask.distributed import Client, LocalCluster
 from multiprocessing import shared_memory
 from filelog import get_logger
+import multiprocessing
 from glob import glob
 import pandas as pd
 import zipfile
@@ -10,18 +11,22 @@ import time
 import io
 import os
 
-def get_object(obj, key_id = '', bucket_key = '', bucket = '', error_log = ''):
+def get_object(obj):
 
     page = obj['Page']
     idx = obj['Index']
     file_key = obj['Key']
+    key_id = obj['KeyId']
+    bucket_key = obj['BucketKey']
+    bucket = obj['Bucket']
+    error_log = obj['ErrorLog']
     name = f'{page}-{idx}'
     size = obj['Size']
     objshm = shared_memory.SharedMemory(create = True, name = name, size=size)
-    
+
     source_sess = boto3.Session(aws_access_key_id = key_id, aws_secret_access_key = bucket_key)
     source_client = source_sess.client('s3')
-    
+
     try:
         key_obj = source_client.get_object(Bucket = bucket, Key = file_key)
         objshm.buf[:size] = key_obj['Body'].read()
@@ -69,9 +74,7 @@ class DataManager():
         self.njobs = njobs
         self.key_id = ''
         self.key = ''
-        self.cluster = LocalCluster(name='bz2data-dask-cluster', n_workers = self.njobs, threads_per_worker = 1, scheduler_port = 0, dashboard_address = ':8787')
-        self.client = Client(self.cluster)
-
+        self.pool = multiprocessing.Pool(processes=self.njobs)
 
     def sourceBucket(self, key_id = '', key = '', bucket = ''):
         if all((key_id, key, bucket)):
@@ -121,14 +124,9 @@ class DataManager():
             destination_client = self.destination.client('s3')
             zip_buffer = io.BytesIO()
 
-            futures = self.client.map(get_object, files, key_id = self.key_id, bucket_key = self.key, bucket = self.source_bucket, error_log = error_log)
-            results = self.client.gather(iter(futures))
-
-            # Need to iterate over results to finish processing
-            for result in results:
-                result
-                
-            if os.path.getsize(log_file) > (self.zip_size * 3):
+            pool_map = self.pool.map(get_object, files)
+            
+            if os.path.getsize(self.log_file) > (self.zip_size * 3):
                 os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
                 with open(self.log_file, 'w'):
                     pass
@@ -194,14 +192,9 @@ class DataManager():
         if all((self.source_bucket, self.destination_directory)):
             zip_buffer = io.BytesIO()
 
-            futures = self.client.map(get_object, files, key_id = self.key_id, bucket_key = self.key, bucket = self.source_bucket, error_log = error_log)
-            results = self.client.gather(iter(futures))
+            pool_map = self.pool.map(get_object, files)
 
-            rlist = []
-            for result in results:
-                rlist.append(result)
-
-            if os.path.getsize(log_file) > (self.zip_size * 3):
+            if os.path.getsize(self.log_file) > (self.zip_size * 3):
                 os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
                 with open(self.log_file, 'w'):
                     pass
@@ -343,9 +336,9 @@ class DataManager():
                             self.file_size = os.path.getsize(obj)
                         case _:
                             if inventory:
-                                obj = {'Key': obj[1]['Key'], 'Size': obj[1]['Size'], 'Index': idx, 'Page': pidx}
+                                obj = {'Key': obj[1]['Key'], 'Size': obj[1]['Size'], 'Index': idx, 'Page': pidx, 'KeyId': self.key_id, 'BucketKey': self.key, 'Bucket': self.source_bucket, 'ErrorLog': self.error_log}
                             else:
-                                obj = {'Key': obj['Key'], 'Size': obj['Size'], 'Index': idx, 'Page': pidx}
+                                obj = {'Key': obj['Key'], 'Size': obj['Size'], 'Index': idx, 'Page': pidx, 'KeyId': self.key_id, 'BucketKey': self.key, 'Bucket': self.source_bucket, 'ErrorLog': self.error_log}
 
                     self.source_count += 1
                     self.obj_size += self.file_size
@@ -379,6 +372,7 @@ class DataManager():
             self.object_count += 1
             self.object_size = 0
             
-            self.client.close(), self.cluster.close()
+            self.pool.close()
+            self.pool.join()
         else:
             self.logger('Source and Destination bucket or path required')
