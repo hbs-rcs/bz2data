@@ -153,10 +153,10 @@ class DataManager():
                     pass
                 self.logger('BZ2DATA Harvard Business School (2025)\n')
                 
-            try:
-                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
-                    
-                    while files:
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
+                
+                while files:
+                    try:
                         obj = files.pop(0)
                         page = obj['Page']
                         idx = obj['Index']
@@ -167,17 +167,17 @@ class DataManager():
                         zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
                         shm.close()
                         shm.unlink()
-                    zip_file.close()
+                    except:
+                        pass
+                zip_file.close()
 
-                zip_buffer.seek(0)
-                buffer_size = zip_buffer.getbuffer().nbytes
-                destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
-                self.total += buffer_size
-                self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.total}')
+            zip_buffer.seek(0)
+            buffer_size = zip_buffer.getbuffer().nbytes
+            destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
+            self.total += buffer_size
+            self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.total}')
 
-                time.sleep(self.timeout) if self.timeout else None
-            except:
-                pass
+            time.sleep(self.timeout) if self.timeout else None
         else:
             print('Error source bucket and destination bucket are needed to compress')
 
@@ -194,20 +194,22 @@ class DataManager():
                     pass
                 self.logger('BZ2DATA Harvard Business School (2025)\n')
                 
-#            try:
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
 
                 while files:
-                    obj = files.pop(0)
-                    page = obj['Page']
-                    idx = obj['Index']
-                    object_path, size = obj['Key'], obj['Size']
-                    name = f'{page}-{idx}'
-                    shm = shared_memory.SharedMemory(name=name)
-                    self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
-                    zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
-                    shm.close()
-                    shm.unlink()
+                    try:
+                        obj = files.pop(0)
+                        page = obj['Page']
+                        idx = obj['Index']
+                        object_path, size = obj['Key'], obj['Size']
+                        name = f'{page}-{idx}'
+                        shm = shared_memory.SharedMemory(name=name)
+                        self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
+                        zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
+                        shm.close()
+                        shm.unlink()
+                    except:
+                        pass
                 zip_file.close()
 
             zip_buffer.seek(0)
@@ -217,8 +219,6 @@ class DataManager():
             self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.total}')
 
             time.sleep(self.timeout) if self.timeout else None
-#            except:
-#                pass
         else:
             print('Error source directory and destination bucket are needed to upload')
 
@@ -234,10 +234,10 @@ class DataManager():
                     pass
                 self.logger('BZ2DATA Harvard Business School (2025)\n')
 
-            try:
-                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
-                    
-                    while files:
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
+                
+                while files:
+                    try:
                         obj = files.pop(0)
                         page = obj['Page']
                         idx = obj['Index']
@@ -248,19 +248,19 @@ class DataManager():
                         zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
                         shm.close()
                         shm.unlink()
-                    zip_file.close()
+                    except:
+                        pass
+                zip_file.close()
 
-                zip_buffer.seek(0)
-                buffer_size = zip_buffer.getbuffer().nbytes
-                destination_name = os.path.join(self.destination_directory, save_name)
-                with open(destination_name, 'wb') as fd:
-                    fd.write(zip_buffer.getvalue())
-                self.total += buffer_size
-                self.logger(f'{page} {idx} ' + f'Downloaded: {destination_name} Size: {buffer_size} ' + f'Total: {self.total}')
+            zip_buffer.seek(0)
+            buffer_size = zip_buffer.getbuffer().nbytes
+            destination_name = os.path.join(self.destination_directory, save_name)
+            with open(destination_name, 'wb') as fd:
+                fd.write(zip_buffer.getvalue())
+            self.total += buffer_size
+            self.logger(f'{page} {idx} ' + f'Downloaded: {destination_name} Size: {buffer_size} ' + f'Total: {self.total}')
 
-                time.sleep(self.timeout) if self.timeout else None
-            except:
-                pass
+            time.sleep(self.timeout) if self.timeout else None
         else:
             print('Error source bucket and destination directory are needed to download')
 
