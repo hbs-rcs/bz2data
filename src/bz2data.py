@@ -1,5 +1,4 @@
 
-from dask.distributed import Client, LocalCluster
 from multiprocessing import shared_memory
 from filelog import get_logger
 import multiprocessing
@@ -30,7 +29,6 @@ def get_object(obj):
     try:
         key_obj = source_client.get_object(Bucket = bucket, Key = file_key)
         objshm.buf[:size] = key_obj['Body'].read()
-        return True
     except:
         objshm.unlink()
 
@@ -38,6 +36,29 @@ def get_object(obj):
             loggerr = get_logger(level = 'ERROR', log_file = error_log)
             loggerr(f'Error downloading {file_key}')
 
+def get_file(obj):
+
+    page = obj['Page']
+    idx = obj['Index']
+    file_key = obj['Key']
+    error_log = obj['ErrorLog']
+    size = obj['Size']
+    name = f'{page}-{idx}'
+    objshm = shared_memory.SharedMemory(create = True, name = name, size=size)
+
+
+    file_descriptor = os.open(file_key, os.O_RDONLY)
+
+    try:
+        objshm.buf[:size] = os.read(file_descriptor, size)
+        os.close(file_descriptor)
+    except:
+        objshm.unlink()
+
+        with open(error_log, 'a') as error_file:
+            loggerr = get_logger(level = 'ERROR', log_file = error_log)
+            loggerr(f'Error downloading {file_key}')
+            
 class DataManager():
 
     def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', njobs = 1, log_file = './bz2data.log', error_log = './bz2data-error.log', timeout = 0):
@@ -160,22 +181,33 @@ class DataManager():
         else:
             print('Error source bucket and destination bucket are needed to compress')
 
-    def upload_zip(self, files = [], save_name = ''):
+    def upload_zip(self, files = [], save_name = '', error_log = ''):
         if all((self.source_directory, self.destination_bucket)):
             destination_client = self.destination.client('s3')
             zip_buffer = io.BytesIO()
 
+            pool_map = self.pool.map(get_file, files)
+            
+            if os.path.getsize(self.log_file) > (self.zip_size * 3):
+                os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
+                with open(self.log_file, 'w'):
+                    pass
+                self.logger('BZ2DATA Harvard Business School (2025)\n')
+                
+#            try:
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
-                object_size = 0
+
                 while files:
-                    page, idx, obj = files.pop(0)
-                    size = os.path.getsize(object)
-                    object_size += size
-                    file_descriptor = os.open(obj, os.O_RDONLY)
-                    file_content = os.read(file_descriptor, size)
-                    os.close(file_descriptor)
-                    self.logger(f'{page} {idx} ' + f'Adding: {obj} Size: {size} ' + f'Total: {object_size}')
-                    zip_file.writestr(obj, file_content, compress_type = zipfile.ZIP_BZIP2)
+                    obj = files.pop(0)
+                    page = obj['Page']
+                    idx = obj['Index']
+                    object_path, size = obj['Key'], obj['Size']
+                    name = f'{page}-{idx}'
+                    shm = shared_memory.SharedMemory(name=name)
+                    self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
+                    zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
+                    shm.close()
+                    shm.unlink()
                 zip_file.close()
 
             zip_buffer.seek(0)
@@ -185,6 +217,8 @@ class DataManager():
             self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.total}')
 
             time.sleep(self.timeout) if self.timeout else None
+#            except:
+#                pass
         else:
             print('Error source directory and destination bucket are needed to upload')
 
@@ -334,6 +368,7 @@ class DataManager():
                     match action:
                         case 'upload':
                             self.file_size = os.path.getsize(obj)
+                            obj = {'Key': obj, 'Size': self.file_size, 'Index': idx, 'Page': pidx, 'ErrorLog': self.error_log}
                         case _:
                             if inventory:
                                 obj = {'Key': obj[1]['Key'], 'Size': obj[1]['Size'], 'Index': idx, 'Page': pidx, 'KeyId': self.key_id, 'BucketKey': self.key, 'Bucket': self.source_bucket, 'ErrorLog': self.error_log}
