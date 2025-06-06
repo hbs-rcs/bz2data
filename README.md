@@ -27,25 +27,27 @@ Both source and distribution can be installed with pip
 
 Usage:
 
-    import bz2data
+    from bz2data import DataManager
 
-    src_key_id = 'SRC-KEY-ID'
-    src_key = 'SRC-KEY'
-    source_bucket = 'SOURCE-BUCKET-NAME'
+    if __name__ == '__main__':
 
-    dest_key_id = 'DEST-KEY-ID'
-    dest_key = 'DEST-KEY'
-    destination_bucket = 'DESTINATION-BUCKET-NAME'
-    
-    names = 'research-data-archive'
+        src_key_id = 'SRC-KEY-ID'
+        src_key = 'SRC-KEY'
+        source_bucket = 'SOURCE-BUCKET-NAME'
 
-    data_manager = bz2data.DataManager(archive_names = names)
-    
-    data_manager.sourceBucket(src_key_id, src_key, source_bucket)
+        dest_key_id = 'DEST-KEY-ID'
+        dest_key = 'DEST-KEY'
+        destination_bucket = 'DESTINATION-BUCKET-NAME'
+        
+        names = 'research-data-archive'
 
-    data_manager.destinationBucket(dest_key_id, dest_key, destination_bucket)
+        data_manager = bz2data.DataManager(archive_names = names, log_file = './bz2data-research-data.log', error_log = './bz2data-error.log')
+        
+        data_manager.sourceBucket(src_key_id, src_key, source_bucket)
 
-    data_manager.compress('compress')
+        data_manager.destinationBucket(dest_key_id, dest_key, destination_bucket)
+
+        data_manager.compress('compress')
 
 
 Info:
@@ -72,7 +74,7 @@ zip file zise is reached, for example:
 
 Upload and compress from disk
 
-    data_manager = bz2data.DataManager(archive_names = names, log_file = './bz2data.log')
+    data_manager = bz2data.DataManager(archive_names = names, log_file = './bz2data-research-data.log', error_log = './bz2data-error.log')
     
     data_manager.sourcePath('Desktop/unzipped')
 
@@ -82,7 +84,7 @@ Upload and compress from disk
 
 Download and compress to disk
 
-    data_manager = bz2data.DataManager(archive_names = names, log_file = './bz2data.log')
+    data_manager = bz2data.DataManager(archive_names = names, log_file = './bz2data-research-data.log', error_log = './bz2data-error.log')
     
     data_manager.destinationPath('Desktop/zipped')
 
@@ -94,9 +96,18 @@ Resume transfer
 
     You can resume a transfer that was interrupted by passing the original log as the resume option string
     
-    data_manager = bz2data.DataManager(archive_names = names, log_file = './new-bz2data.log')
+    data_manager = bz2data.DataManager(archive_names = names, log_file = './new-bz2data.log', error_log = './bz2data-error.log')
     
     data_manager.compress('compress', resume = './bz2data.log')
+
+Run in parallel
+
+    data_manager = bz2data.DataManager(archive_names = names, njobs = 10)
+
+
+Add delay between uploads/downloads to prevent flooding the network (Most of the time it is not necessary)
+
+    data_manager = bz2data.DataManager(archive_names = names, timeout = 0)
 
 Extract using command line
 
