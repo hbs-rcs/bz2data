@@ -27,14 +27,16 @@ def get_object(obj):
     source_client = source_sess.client('s3')
 
     try:
+        with open(f'./{bucket}-progress.log', 'a') as fd:
+            fd.write(f'Downloading {file_key}\n')
         key_obj = source_client.get_object(Bucket = bucket, Key = file_key)
         objshm.buf[:size] = key_obj['Body'].read()
-    except:
+    except Exception as e:
         objshm.unlink()
 
         with open(error_log, 'a') as error_file:
             loggerr = get_logger(level = 'ERROR', log_file = error_log)
-            loggerr(f'Error downloading {file_key}')
+            loggerr(f'Error downloading {file_key}', e)
 
 def get_file(obj):
 
@@ -52,12 +54,12 @@ def get_file(obj):
     try:
         objshm.buf[:size] = os.read(file_descriptor, size)
         os.close(file_descriptor)
-    except:
+    except Exception as e:
         objshm.unlink()
 
         with open(error_log, 'a') as error_file:
             loggerr = get_logger(level = 'ERROR', log_file = error_log)
-            loggerr(f'Error downloading {file_key}')
+            loggerr(f'Error downloading {file_key}', e)
             
 class DataManager():
 
@@ -91,7 +93,6 @@ class DataManager():
         self.source_directory = ''
         self.page_size = 1000
         self.destination_directory = ''
-        self.total = 0
         self.njobs = njobs
         self.key_id = ''
         self.key = ''
@@ -174,8 +175,7 @@ class DataManager():
             zip_buffer.seek(0)
             buffer_size = zip_buffer.getbuffer().nbytes
             destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
-            self.total += buffer_size
-            self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.total}')
+            self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
 
             time.sleep(self.timeout) if self.timeout else None
         else:
@@ -215,8 +215,7 @@ class DataManager():
             zip_buffer.seek(0)
             buffer_size = zip_buffer.getbuffer().nbytes
             destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
-            self.total += buffer_size
-            self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.total}')
+            self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
 
             time.sleep(self.timeout) if self.timeout else None
         else:
@@ -257,8 +256,7 @@ class DataManager():
             destination_name = os.path.join(self.destination_directory, save_name)
             with open(destination_name, 'wb') as fd:
                 fd.write(zip_buffer.getvalue())
-            self.total += buffer_size
-            self.logger(f'{page} {idx} ' + f'Downloaded: {destination_name} Size: {buffer_size} ' + f'Total: {self.total}')
+            self.logger(f'{page} {idx} ' + f'Downloaded: {destination_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
 
             time.sleep(self.timeout) if self.timeout else None
         else:
@@ -371,8 +369,10 @@ class DataManager():
                             obj = {'Key': obj, 'Size': self.file_size, 'Index': idx, 'Page': pidx, 'ErrorLog': self.error_log}
                         case _:
                             if inventory:
+                                self.file_size = obj[1]['Size']
                                 obj = {'Key': obj[1]['Key'], 'Size': obj[1]['Size'], 'Index': idx, 'Page': pidx, 'KeyId': self.key_id, 'BucketKey': self.key, 'Bucket': self.source_bucket, 'ErrorLog': self.error_log}
                             else:
+                                self.file_size = obj['Size']
                                 obj = {'Key': obj['Key'], 'Size': obj['Size'], 'Index': idx, 'Page': pidx, 'KeyId': self.key_id, 'BucketKey': self.key, 'Bucket': self.source_bucket, 'ErrorLog': self.error_log}
 
                     self.source_count += 1
@@ -393,7 +393,7 @@ class DataManager():
                             continue
 
                         destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
-                        self.object_size -= self.file_size
+                        self.obj_size -= self.file_size
                         error_log = self.error_log
                         zip_function(self.zip_list, destination_key, error_log = error_log)
                         self.object_count += 1
@@ -405,7 +405,7 @@ class DataManager():
             error_log = self.error_log
             zip_function(self.zip_list, destination_key, error_log = error_log)
             self.object_count += 1
-            self.object_size = 0
+            self.obj_size = 0
             
             self.pool.close()
             self.pool.join()
