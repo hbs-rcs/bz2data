@@ -31,12 +31,12 @@ def get_object(obj):
             fd.write(f'Downloading {file_key}\n')
         key_obj = source_client.get_object(Bucket = bucket, Key = file_key)
         objshm.buf[:size] = key_obj['Body'].read()
-    except Exception as e:
+    except:
         objshm.unlink()
 
         with open(error_log, 'a') as error_file:
             loggerr = get_logger(level = 'ERROR', log_file = error_log)
-            loggerr(f'Error downloading {file_key}', e)
+            loggerr(f'Error downloading {file_key}')
 
 def get_file(obj):
 
@@ -54,12 +54,12 @@ def get_file(obj):
     try:
         objshm.buf[:size] = os.read(file_descriptor, size)
         os.close(file_descriptor)
-    except Exception as e:
+    except:
         objshm.unlink()
 
         with open(error_log, 'a') as error_file:
             loggerr = get_logger(level = 'ERROR', log_file = error_log)
-            loggerr(f'Error downloading {file_key}', e)
+            loggerr(f'Error downloading {file_key}')
             
 class DataManager():
 
