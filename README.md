@@ -96,6 +96,8 @@ Resume transfer
 
     You can resume a transfer that was interrupted by passing the original log as the resume option string
     
+    It will also not overwrite already downloaded and zipped files even if you change the zip size on resume
+    
     data_manager = bz2data.DataManager(archive_names = names, log_file = './new-bz2data.log', error_log = './bz2data-error.log')
     
     data_manager.compress('compress', resume = './bz2data.log')
@@ -103,6 +105,12 @@ Resume transfer
 Run in parallel
 
     data_manager = bz2data.DataManager(archive_names = names, njobs = 10)
+    
+S3 inventory list
+
+    Please refer to the inventory script in the test directory, using S3 inventory will drastically
+    reduce listing pricing as the cost is $0.0025 per million objects listed, this is recommended for 
+    extremely large datasets that otherwise would make cost skyrocket with the list v2 api
 
 
 Add delay between uploads/downloads to prevent flooding the network (Most of the time it is not necessary)

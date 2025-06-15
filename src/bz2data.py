@@ -87,7 +87,6 @@ class DataManager():
         self.obj_size = 0
         self.file_size = 0
         self.objects = 0
-        self.source_count = 0
         self.zip_list = []
         self.timeout = timeout
         self.source_directory = ''
@@ -295,7 +294,6 @@ class DataManager():
 
                 for idx, obj in enumerate(page.get('Contents', [])):
                 
-                    self.source_count += 1
                     self.file_size = obj['Size']
                     self.obj_size += self.file_size
                     destination_key = obj['Key']
@@ -375,7 +373,6 @@ class DataManager():
                                 self.file_size = obj['Size']
                                 obj = {'Key': obj['Key'], 'Size': obj['Size'], 'Index': idx, 'Page': pidx, 'KeyId': self.key_id, 'BucketKey': self.key, 'Bucket': self.source_bucket, 'ErrorLog': self.error_log}
 
-                    self.source_count += 1
                     self.obj_size += self.file_size
 
                     # Zip buffer size has been exceeded
