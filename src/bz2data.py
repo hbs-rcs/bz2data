@@ -3,7 +3,7 @@ from boto3.s3.transfer import TransferConfig
 from multiprocessing import shared_memory
 from filelog import get_logger
 import multiprocessing
-from glob import glob
+from glob import iglob
 import pandas as pd
 import zipfile
 import boto3
