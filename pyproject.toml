@@ -14,7 +14,7 @@ authors = [
 ]
 description = "Compress data into bz2 zip archives"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: Pending Approval :: Harvard Business School",
