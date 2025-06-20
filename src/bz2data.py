@@ -1,4 +1,5 @@
 
+from boto3.s3.transfer import TransferConfig
 from multiprocessing import shared_memory
 from filelog import get_logger
 import multiprocessing
@@ -27,7 +28,7 @@ def get_object(obj):
     source_client = source_sess.client('s3')
 
     try:
-        with open(f'./{bucket}-progress.log', 'a') as fd:
+        with open(f'{bucket}-progress.log', 'a') as fd:
             fd.write(f'Downloading {file_key}\n')
         key_obj = source_client.get_object(Bucket = bucket, Key = file_key)
         objshm.buf[:size] = key_obj['Body'].read()
@@ -63,7 +64,7 @@ def get_file(obj):
             
 class DataManager():
 
-    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', njobs = 1, log_file = './bz2data.log', error_log = './bz2data-error.log', timeout = 0):
+    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', njobs = 1, log_file = 'bz2data.log', error_log = 'bz2data-error.log', tmp_dir = 'research-bz2data', timeout = 0):
 
         '''
 
@@ -96,6 +97,8 @@ class DataManager():
         self.key_id = ''
         self.key = ''
         self.pool = multiprocessing.Pool(processes=self.njobs)
+        self.config = TransferConfig(multipart_threshold=1024 * 25, max_concurrency=10, multipart_chunksize=1024 * 25, use_threads=True)
+        self.tmp_dir = tmp_dir
 
     def sourceBucket(self, key_id = '', key = '', bucket = ''):
         if all((key_id, key, bucket)):
@@ -213,7 +216,17 @@ class DataManager():
 
             zip_buffer.seek(0)
             buffer_size = zip_buffer.getbuffer().nbytes
-            destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
+            
+            destination_name = os.path.join(self.tmp_dir, save_name)
+            if os.listdir(self.tmp_dir) != 0:
+                tmpfiles = glob(f'{self.tmp_dir}/*')
+                [os.remove(tf) for tf in tmpfiles]
+
+            with open(destination_name, 'wb') as fd:
+                fd.write(zip_buffer.getvalue())
+            
+            destination_client.upload_file(destination_name, self.destination_bucket, destination_name, Config=self.config)
+#            destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
             self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
 
             time.sleep(self.timeout) if self.timeout else None
@@ -320,6 +333,7 @@ class DataManager():
         
             match action:
                 case 'upload':
+                    os.makedirs(self.tmp_dir, mode=0o700, exist_ok=True)
                     zip_function = self.upload_zip
                     all_files = glob(f'{self.source_directory}/**/*.*', recursive=True)
                     all_pages = range(0, len(all_files), self.page_size)
@@ -333,6 +347,7 @@ class DataManager():
                         paginator = source_client.get_paginator('list_objects_v2')
                         all_pages = paginator.paginate(Bucket=self.source_bucket)
                 case 'compress':
+                    os.makedirs(self.tmp_dir, mode=0o700, exist_ok=True)
                     zip_function = self.generate_zip
                     if inventory:
                         all_files = pd.read_csv(inventory, header=None, names=['Bucket', 'Key', 'Size'], low_memory=False)
