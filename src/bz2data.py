@@ -3,7 +3,7 @@ from boto3.s3.transfer import TransferConfig
 from multiprocessing import shared_memory
 from filelog import get_logger
 import multiprocessing
-from glob import iglob
+from glob import glob
 import pandas as pd
 import zipfile
 import boto3
@@ -219,7 +219,7 @@ class DataManager():
             
             destination_name = os.path.join(self.tmp_dir, save_name)
             if os.listdir(self.tmp_dir) != 0:
-                tmpfiles = iglob(f'{self.tmp_dir}/*')
+                tmpfiles = glob(f'{self.tmp_dir}/*')
                 [os.remove(tf) for tf in tmpfiles]
 
             with open(destination_name, 'wb') as fd:
@@ -335,7 +335,7 @@ class DataManager():
                 case 'upload':
                     os.makedirs(self.tmp_dir, mode=0o700, exist_ok=True)
                     zip_function = self.upload_zip
-                    all_files = iglob(f'{self.source_directory}/**/*.*', recursive=True)
+                    all_files = glob(f'{self.source_directory}/**/*.*', recursive=True)
                     all_pages = range(0, len(all_files), self.page_size)
                 case 'download':
                     zip_function = self.download_zip
