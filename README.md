@@ -98,6 +98,8 @@ Resume transfer
     
     It will also not overwrite already downloaded and zipped files even if you change the zip size on resume
     
+    Once the log reaches three times the zip size it will create a new one, the old ones will have digits appdended to the name
+    
     data_manager = bz2data.DataManager(archive_names = names, log_file = './new-bz2data.log', error_log = './bz2data-error.log')
     
     data_manager.compress('compress', resume = './bz2data.log')
