@@ -375,7 +375,7 @@ class DataManager():
 
                     if resume and idx <= RIDX:
                         continue
-                    
+
                     match action:
                         case 'upload':
                             self.file_size = os.path.getsize(obj)

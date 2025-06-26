@@ -11,7 +11,7 @@ if __name__ == '__main__':
     source_bucket = 'bucket-name'
     names = 'research-data-archive'
 
-    data_manager = bz2data.DataManager(zip_size = 96000000, archive_names = names, destination_class = 'STANDARD', njobs = 32, log_file = './bz2data-research-data.log', error_log = './bz2data-error.log', timeout = 0)
+    data_manager = bz2data.DataManager(archive_names = names, destination_class = 'STANDARD', njobs = 32, log_file = './bz2data-research-data.log', error_log = './bz2data-error.log', timeout = 0)
 
     data_manager.sourceBucket(src_key_id, src_key, source_bucket)
     data_manager.destinationPath('/large/capacity/volume/mountpoint/zipped')
@@ -30,7 +30,7 @@ if __name__ == '__main__':
     
     for group, csv_inventory in enumerate(all_csvs):
         group_str = str(group)
-        zip_group = f'{names}-group-str'
+        zip_group = f'{names}-{group-str}'
         with open('./csv-progress.log', 'a') as fd:
             fd.write(f'{csv_inventory}\n')
         data_manager.compress('download', inventory = csv_inventory)
