@@ -30,10 +30,12 @@ if __name__ == '__main__':
     
     for group, csv_inventory in enumerate(all_csvs):
         group_str = str(group)
-        zip_group = f'{names}-{group-str}'
+        zip_group = f'{names}-group{group-str}'
         with open('./csv-progress.log', 'a') as fd:
             fd.write(f'{csv_inventory}\n')
-        data_manager.compress('download', inventory = csv_inventory)
+        # Add csv file index as group number to the zip names (example: research-data-archive-group1-0.zip)
         data_manager.zip_name = zip_group
+        
+        data_manager.compress('download', inventory = csv_inventory)
         
     total_t = time.time() - t
