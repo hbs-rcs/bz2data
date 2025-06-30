@@ -3,7 +3,7 @@ from boto3.s3.transfer import TransferConfig
 from multiprocessing import shared_memory
 from filelog import get_logger
 import multiprocessing
-from glob import glob
+from glob import glob, iglob
 import pandas as pd
 import zipfile
 import boto3
@@ -11,6 +11,26 @@ import time
 import io
 import os
 
+def paginate_generator(generator, page_size):
+    """
+    Paginates a given generator into chunks of page_size.
+
+    Args:
+        generator: The generator to paginate.
+        page_size: The number of items per page.
+
+    Yields:
+        A list containing items for the current page.
+    """
+    page = []
+    for item in generator:
+        page.append(item)
+        if len(page) == page_size:
+            yield page
+            page = []
+    if page:  # Yield any remaining items in the last partial page
+        yield page
+        
 def get_object(obj):
 
     page = obj['Page']
@@ -28,8 +48,6 @@ def get_object(obj):
     source_client = source_sess.client('s3')
 
     try:
-        with open(f'{bucket}-progress.log', 'a') as fd:
-            fd.write(f'Downloading {file_key}\n')
         key_obj = source_client.get_object(Bucket = bucket, Key = file_key)
         objshm.buf[:size] = key_obj['Body'].read()
     except:
@@ -97,7 +115,7 @@ class DataManager():
         self.key_id = ''
         self.key = ''
         self.pool = multiprocessing.Pool(processes=self.njobs)
-        self.config = TransferConfig(multipart_threshold=1024 * 25, max_concurrency=10, multipart_chunksize=1024 * 25, use_threads=True)
+        self.config = TransferConfig(multipart_threshold=2500000000, max_concurrency=self.njobs, multipart_chunksize=250000000, use_threads=True)
         self.tmp_dir = tmp_dir
 
     def sourceBucket(self, key_id = '', key = '', bucket = ''):
@@ -154,7 +172,7 @@ class DataManager():
                 os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
                 with open(self.log_file, 'w'):
                     pass
-                self.logger('BZ2DATA Harvard Business School (2025)\n')
+                self.logger('BZ2DATA Harvard Business School 2025 (S3 small files take long to download, test decreasing zip size to confirm)\n')
                 
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
                 
@@ -318,25 +336,25 @@ class DataManager():
         with open(self.log_file, 'w'):
             pass
         self.logger('BZ2DATA Harvard Business School (2025)\n')
-        
-        if resume:
-            df = pd.read_csv(resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
-            resume_idx = df.where(df['ACTION'] != 'Adding:').last_valid_index()
-            self.object_count = int(df.loc[resume_idx].FILE.split('.')[0][-1]) + 1
-            Page, Id = df[['PAGE', 'ID']].iloc[resume_idx].values
-            RIDX = df.loc[Id].ID
 
         source_t = (self.source_bucket, self.source_directory)
         destination_t = (self.destination_bucket, self.destination_directory)
         
         if any(source_t) and any(destination_t):
         
+            if resume:
+                df = pd.read_csv(resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
+                resume_idx = df.where(df['ACTION'] != 'Adding:').last_valid_index()
+                self.object_count = int(df.loc[resume_idx].FILE.split('.')[0][-1]) + 1
+                Page, Id = df[['PAGE', 'ID']].iloc[resume_idx].values
+                RIDX = df.loc[Id].ID
+
             match action:
                 case 'upload':
                     os.makedirs(self.tmp_dir, mode=0o700, exist_ok=True)
                     zip_function = self.upload_zip
-                    all_files = glob(f'{self.source_directory}/**/*.*', recursive=True)
-                    all_pages = range(0, len(all_files), self.page_size)
+                    all_files = iglob(f'{self.source_directory}/**/*.*', recursive=True)
+                    all_pages = paginate_generator(all_files, self.page_size)
                 case 'download':
                     zip_function = self.download_zip
                     if inventory:
@@ -364,7 +382,7 @@ class DataManager():
                     
                 match action:
                     case 'upload':
-                        page_list = all_files[page: page + self.page_size]
+                        page_list = page
                     case _:
                         if inventory:
                             page_list = all_files[page: page + self.page_size].iterrows()
@@ -399,23 +417,20 @@ class DataManager():
 
                             destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
                             self.obj_size -= self.file_size
-                            error_log = self.error_log
-                            zip_function([obj], destination_key, error_log = error_log)
+                            zip_function([obj], destination_key, error_log = self.error_log)
                             self.object_count += 1
                             continue
 
                         destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
                         self.obj_size -= self.file_size
-                        error_log = self.error_log
-                        zip_function(self.zip_list, destination_key, error_log = error_log)
+                        zip_function(self.zip_list, destination_key, error_log = self.error_log)
                         self.object_count += 1
                         self.obj_size = self.file_size
 
                     self.zip_list.append(obj)
 
             destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
-            error_log = self.error_log
-            zip_function(self.zip_list, destination_key, error_log = error_log)
+            zip_function(self.zip_list, destination_key, error_log = self.error_log)
             self.object_count += 1
             self.obj_size = 0
             
