@@ -120,7 +120,6 @@ class DataManager():
         self.src_key = ''
         self.dest_key_id = ''
         self.dest_key = ''
-        self.pool = multiprocessing.Pool(processes=self.njobs)
         self.config = TransferConfig(multipart_threshold=multipart_threshold, max_concurrency=self.njobs, multipart_chunksize=multipart_chunksize, num_download_attempts=5, use_threads=True)
         self.max_file_size = max_file_size
         self.src_region = ''
@@ -178,7 +177,10 @@ class DataManager():
             destination_client = self.destination.client('s3')
             zip_buffer = io.BytesIO()
 
-            pool_map = self.pool.map(get_object, files)
+            pool = multiprocessing.Pool(processes=self.njobs)
+            pool_map = pool.map(get_object, files)
+            pool.close()
+            pool.join()
             
             if os.path.getsize(self.log_file) > (self.zip_size * 3):
                 os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
@@ -218,7 +220,10 @@ class DataManager():
             destination_client = self.destination.client('s3')
             zip_buffer = io.BytesIO()
 
-            pool_map = self.pool.map(get_file, files)
+            pool = multiprocessing.Pool(processes=self.njobs)
+            pool_map = pool.map(get_object, files)
+            pool.close()
+            pool.join()
             
             if os.path.getsize(self.log_file) > (self.zip_size * 3):
                 os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
@@ -258,7 +263,10 @@ class DataManager():
         if all((self.source_bucket, self.destination_directory)):
             zip_buffer = io.BytesIO()
 
-            pool_map = self.pool.map(get_object, files)
+            pool = multiprocessing.Pool(processes=self.njobs)
+            pool_map = pool.map(get_object, files)
+            pool.close()
+            pool.join()
 
             if os.path.getsize(self.log_file) > (self.zip_size * 3):
                 os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
@@ -457,8 +465,6 @@ class DataManager():
                 zip_function(self.zip_list, destination_key, error_log = self.error_log)
                 self.object_count += 1
                 self.obj_size = 0
-                
-            self.pool.close()
-            self.pool.join()
+
         else:
             self.logger('Source and Destination bucket or path required')
