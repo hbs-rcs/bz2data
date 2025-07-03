@@ -60,7 +60,7 @@ For bucket to bucket add the user.json policy to the user on the source account,
 
 For upload or dowload add the default.json policy to the user on the source/destination account
 
-Will overwrite .aws/credentials and .aws/config using credential csv files provided
+Will overwrite .aws/credentials and .aws/config using credential csv files provided when transferring bucket to bucket
 
 Change zip file size (default: 5000000000)
 

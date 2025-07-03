@@ -320,11 +320,12 @@ class DataManager():
             creds_file = os.path.join(aws_dir, 'credentials')
             conf_file = os.path.join(aws_dir, 'config')
             
-            with open(creds_file, 'w') as creds_fd:
-                creds_fd.write(f'[default]\naws_access_key_id={self.src_key_id}\naws_secret_access_key={self.src_key}\n\n[destination]\naws_access_key_id={self.dest_key_id}\naws_secret_access_key={self.dest_key}')
+            if all((self.source_bucket, self.destination_bucket))
+                with open(creds_file, 'w') as creds_fd:
+                    creds_fd.write(f'[default]\naws_access_key_id={self.src_key_id}\naws_secret_access_key={self.src_key}\n\n[destination]\naws_access_key_id={self.dest_key_id}\naws_secret_access_key={self.dest_key}')
 
-            with open(conf_file, 'w') as conf_fd:
-                conf_fd.write(f'[default]\nregion={self.src_region}\noutput=json\n\n[profile destination]\nregion={self.dest_region}\noutput=text\n')
+                with open(conf_file, 'w') as conf_fd:
+                    conf_fd.write(f'[default]\nregion={self.src_region}\noutput=json\n\n[profile destination]\nregion={self.dest_region}\noutput=text\n')
 
             if resume:
                 df = pd.read_csv(resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
