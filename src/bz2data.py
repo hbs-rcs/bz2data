@@ -222,7 +222,7 @@ class DataManager():
             zip_buffer = io.BytesIO()
 
             pool = multiprocessing.Pool(processes=self.njobs)
-            pool_map = pool.map(get_object, files)
+            pool_map = pool.map(get_file, files)
             pool.close()
             pool.join()
             
