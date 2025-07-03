@@ -320,7 +320,7 @@ class DataManager():
             creds_file = os.path.join(aws_dir, 'credentials')
             conf_file = os.path.join(aws_dir, 'config')
             
-            if all((self.source_bucket, self.destination_bucket))
+            if all((self.source_bucket, self.destination_bucket)):
                 with open(creds_file, 'w') as creds_fd:
                     creds_fd.write(f'[default]\naws_access_key_id={self.src_key_id}\naws_secret_access_key={self.src_key}\n\n[destination]\naws_access_key_id={self.dest_key_id}\naws_secret_access_key={self.dest_key}')
 
