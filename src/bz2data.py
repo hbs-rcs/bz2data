@@ -401,7 +401,7 @@ class DataManager():
                                     self.logger(f'{pidx} {idx} ' + f'Uploaded: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
                                     time.sleep(self.timeout) if self.timeout else None
                                 except:
-                                    self.loggerr(f'Error uploading {file_key}')
+                                    self.loggerr(f'Error uploading {object_path}')
                             case 'download':
                                 try:
                                     self.logger(f'{pidx} {idx} ' + f'Adding: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
@@ -410,7 +410,7 @@ class DataManager():
                                     self.logger(f'{pidx} {idx} ' + f'Downloaded: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
                                     time.sleep(self.timeout) if self.timeout else None
                                 except:
-                                    self.loggerr(f'Error downloading {file_key}')
+                                    self.loggerr(f'Error downloading {object_path}')
                             case 'compress':
                                 try:
                                     botocore_config = botocore.config.Config(max_pool_connections = self.njobs, total_max_attempts = 5)
@@ -435,7 +435,7 @@ class DataManager():
                                     self.logger(f'{pidx} {idx} ' + f'Uploaded: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
                                     time.sleep(self.timeout) if self.timeout else None
                                 except:
-                                    self.loggerr(f'Error transferring {file_key}')
+                                    self.loggerr(f'Error transferring {object_path}')
                         continue
 
                     self.obj_size += self.file_size
