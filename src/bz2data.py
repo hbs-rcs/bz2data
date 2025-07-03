@@ -1,10 +1,12 @@
 
 from boto3.s3.transfer import TransferConfig
 from multiprocessing import shared_memory
+import boto3.s3.transfer as s3transfer
 from filelog import get_logger
 import multiprocessing
 from glob import glob, iglob
 import pandas as pd
+import botocore
 import zipfile
 import boto3
 import time
@@ -42,7 +44,7 @@ def get_object(obj):
     error_log = obj['ErrorLog']
     name = f'{page}-{idx}'
     size = obj['Size']
-    objshm = shared_memory.SharedMemory(create = True, name = name, size=size)
+    objshm = shared_memory.SharedMemory(name = name, create = True, size=size)
 
     source_sess = boto3.Session(aws_access_key_id = key_id, aws_secret_access_key = bucket_key)
     source_client = source_sess.client('s3')
@@ -50,6 +52,7 @@ def get_object(obj):
     try:
         key_obj = source_client.get_object(Bucket = bucket, Key = file_key)
         objshm.buf[:size] = key_obj['Body'].read()
+        objshm.close()
     except:
         objshm.unlink()
 
@@ -65,24 +68,25 @@ def get_file(obj):
     error_log = obj['ErrorLog']
     size = obj['Size']
     name = f'{page}-{idx}'
-    objshm = shared_memory.SharedMemory(create = True, name = name, size=size)
+    objshm = shared_memory.SharedMemory(name = name, create = True, size=size)
 
 
     file_descriptor = os.open(file_key, os.O_RDONLY)
 
     try:
         objshm.buf[:size] = os.read(file_descriptor, size)
+        objshm.close()
         os.close(file_descriptor)
     except:
         objshm.unlink()
 
         with open(error_log, 'a') as error_file:
             loggerr = get_logger(level = 'ERROR', log_file = error_log)
-            loggerr(f'Error downloading {file_key}')
+            loggerr(f'Error downloading or reading {file_key}')
             
 class DataManager():
 
-    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', njobs = 1, log_file = 'bz2data.log', error_log = 'bz2data-error.log', tmp_dir = 'research-bz2data', timeout = 0):
+    def __init__(self, zip_size = 5000000000, archive_names = 'bz2data-zip-archive', destination_class = 'STANDARD', njobs = 1, log_file = 'bz2data.log', error_log = 'bz2data-error.log', max_file_size = 9000000000, multipart_threshold = 500000000, multipart_chunksize = 50000000, timeout = 0):
 
         '''
 
@@ -112,16 +116,21 @@ class DataManager():
         self.page_size = 1000
         self.destination_directory = ''
         self.njobs = njobs
-        self.key_id = ''
-        self.key = ''
+        self.src_key_id = ''
+        self.src_key = ''
+        self.dest_key_id = ''
+        self.dest_key = ''
         self.pool = multiprocessing.Pool(processes=self.njobs)
-        self.config = TransferConfig(multipart_threshold=2500000000, max_concurrency=self.njobs, multipart_chunksize=250000000, use_threads=True)
-        self.tmp_dir = tmp_dir
+        self.config = TransferConfig(multipart_threshold=multipart_threshold, max_concurrency=self.njobs, multipart_chunksize=multipart_chunksize, num_download_attempts=5, use_threads=True)
+        self.max_file_size = max_file_size
+        self.src_region = ''
+        self.dest_region= ''
 
-    def sourceBucket(self, key_id = '', key = '', bucket = ''):
+    def sourceBucket(self, key_id = '', key = '', bucket = '', region = 'us-east-1'):
         if all((key_id, key, bucket)):
-            self.key_id = key_id
-            self.key = key
+            self.src_key_id = key_id
+            self.src_key = key
+            self.src_region = region
             source_sess = boto3.Session(
                 aws_access_key_id = key_id,
                 aws_secret_access_key = key
@@ -137,8 +146,11 @@ class DataManager():
 #            total_bytes = sum([obj.size for obj in source_bucket.objects.all()])
 #            self.logger(f'\nSource:\nTotal bucket size: {total_bytes/1024/1024/1024} GB\ntotal bucket objects: {total_objs}')
 
-    def destinationBucket(self, key_id = '', key = '', bucket = ''):
+    def destinationBucket(self, key_id = '', key = '', bucket = '', region = 'us-east-1'):
         if all((key_id, key, bucket)):
+            self.dest_key_id = key_id
+            self.dest_key = key
+            self.dest_region = region
             dest_sess = boto3.Session(
                 aws_access_key_id = key_id,
                 aws_secret_access_key = key
@@ -172,8 +184,9 @@ class DataManager():
                 os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
                 with open(self.log_file, 'w'):
                     pass
-                self.logger('BZ2DATA Harvard Business School 2025 (S3 small files take long to download, test decreasing zip size to confirm)\n')
+                self.logger('BZ2DATA Harvard Business School (2025)\n')
                 
+            last_page, last_idx = files[-1]['Page'], files[-1]['Index']
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
                 
                 while files:
@@ -184,7 +197,6 @@ class DataManager():
                         object_path, size = obj['Key'], obj['Size']
                         name = f'{page}-{idx}'
                         shm = shared_memory.SharedMemory(name=name)
-                        self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
                         zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
                         shm.close()
                         shm.unlink()
@@ -194,8 +206,8 @@ class DataManager():
 
             zip_buffer.seek(0)
             buffer_size = zip_buffer.getbuffer().nbytes
-            destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
-            self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
+            destination_client.upload_fileobj(zip_buffer, self.destination_bucket, save_name, ExtraArgs = { 'StorageClass' : self.destination_class }, Config=self.config)
+            self.logger(f'{last_page} {last_idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
 
             time.sleep(self.timeout) if self.timeout else None
         else:
@@ -214,6 +226,7 @@ class DataManager():
                     pass
                 self.logger('BZ2DATA Harvard Business School (2025)\n')
                 
+            last_page, last_idx = files[-1]['Page'], files[-1]['Index']
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
 
                 while files:
@@ -224,7 +237,6 @@ class DataManager():
                         object_path, size = obj['Key'], obj['Size']
                         name = f'{page}-{idx}'
                         shm = shared_memory.SharedMemory(name=name)
-                        self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
                         zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
                         shm.close()
                         shm.unlink()
@@ -234,18 +246,9 @@ class DataManager():
 
             zip_buffer.seek(0)
             buffer_size = zip_buffer.getbuffer().nbytes
-            
-            destination_name = os.path.join(self.tmp_dir, save_name)
-            if os.listdir(self.tmp_dir) != 0:
-                tmpfiles = glob(f'{self.tmp_dir}/*')
-                [os.remove(tf) for tf in tmpfiles]
 
-            with open(destination_name, 'wb') as fd:
-                fd.write(zip_buffer.getvalue())
-            
-            destination_client.upload_file(destination_name, self.destination_bucket, destination_name, Config=self.config)
-#            destination_client.put_object(Bucket = self.destination_bucket, Key = save_name, Body = zip_buffer, StorageClass = self.destination_class)
-            self.logger(f'{page} {idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
+            destination_client.upload_fileobj(zip_buffer, self.destination_bucket, save_name, ExtraArgs = { 'StorageClass' : self.destination_class }, Config=self.config)
+            self.logger(f'{last_page} {last_idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
 
             time.sleep(self.timeout) if self.timeout else None
         else:
@@ -263,6 +266,7 @@ class DataManager():
                     pass
                 self.logger('BZ2DATA Harvard Business School (2025)\n')
 
+            last_page, last_idx = files[-1]['Page'], files[-1]['Index']
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
                 
                 while files:
@@ -273,7 +277,6 @@ class DataManager():
                         object_path, size = obj['Key'], obj['Size']
                         name = f'{page}-{idx}'
                         shm = shared_memory.SharedMemory(name=name)
-                        self.logger(f'{page} {idx} ' + f'Adding: {object_path} Size: {size} ' + f'Total: {self.obj_size}')
                         zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
                         shm.close()
                         shm.unlink()
@@ -286,50 +289,11 @@ class DataManager():
             destination_name = os.path.join(self.destination_directory, save_name)
             with open(destination_name, 'wb') as fd:
                 fd.write(zip_buffer.getvalue())
-            self.logger(f'{page} {idx} ' + f'Downloaded: {destination_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
+            self.logger(f'{last_page} {last_idx} ' + f'Downloaded: {destination_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
 
             time.sleep(self.timeout) if self.timeout else None
         else:
             print('Error source bucket and destination directory are needed to download')
-
-    def transfer(self):
-        if all((self.source_bucket, self.destination_bucket)):
-            source_client = self.source.client('s3')
-            destination_client = self.destination.client('s3')
-            paginator = source_client.get_paginator('list_objects_v2')
-
-            for pidx, page in enumerate(paginator.paginate(Bucket=self.source_bucket)):
-
-                for idx, obj in enumerate(page.get('Contents', [])):
-
-                    file_obj = source_client.get_object(Bucket=self.source_bucket, Key=obj['Key'])
-                    file_content = file_obj['Body'].read()
-                    self.file_size = obj['Size']
-                    self.obj_size += self.file_size
-                    destination_key = obj['Key']
-                    destination_client.put_object(Bucket = self.destination_bucket, Key = destination_key, Body = file_content, StorageClass = self.destination_class)
-                    self.logger(f'{pidx} {idx} ' + f'Listed: {destination_key} Size: {self.file_size} ' + f'Total: {self.obj_size}')
-
-    def getList(self):
-        if self.source_bucket:
-
-            # Clear log file
-            with open(self.log_file, 'w'):
-                pass
-            self.logger('BZ2DATA Harvard Business School (2025)\n')
-
-            source_client = self.source.client('s3')
-            paginator = source_client.get_paginator('list_objects_v2')
-
-            for pidx, page in enumerate(paginator.paginate(Bucket=self.source_bucket)):
-
-                for idx, obj in enumerate(page.get('Contents', [])):
-                
-                    self.file_size = obj['Size']
-                    self.obj_size += self.file_size
-                    destination_key = obj['Key']
-
-                    self.logger(f'{pidx} {idx} ' + f'Listed: {destination_key} Size: {self.file_size} ' + f'Total: {self.obj_size}')
 
     def compress(self, action, resume = '', inventory = ''):
 
@@ -341,7 +305,18 @@ class DataManager():
         destination_t = (self.destination_bucket, self.destination_directory)
         
         if any(source_t) and any(destination_t):
-        
+            
+            aws_dir =  os.path.join(os.environ['HOME'], '.aws')
+            os.makedirs(aws_dir, mode=0o700, exist_ok=True)
+            creds_file = os.path.join(aws_dir, 'credentials')
+            conf_file = os.path.join(aws_dir, 'config')
+            
+            with open(creds_file, 'w') as creds_fd:
+                creds_fd.write(f'[default]\naws_access_key_id={self.src_key_id}\naws_secret_access_key={self.src_key}\n\n[destination]\naws_access_key_id={self.dest_key_id}\naws_secret_access_key={self.dest_key}')
+
+            with open(conf_file, 'w') as conf_fd:
+                conf_fd.write(f'[default]\nregion={self.src_region}\noutput=json\n\n[profile destination]\nregion={self.dest_region}\noutput=text\n')
+
             if resume:
                 df = pd.read_csv(resume, sep="\s+", header=None, usecols=[0, 1, 7, 8, 9, 10, 12, 14], names=['DATE', 'TIMESTAPM', 'PAGE', 'ID', 'ACTION', 'FILE', 'SIZE', 'TOTAL'], skiprows=[0, 1])
                 resume_idx = df.where(df['ACTION'] != 'Adding:').last_valid_index()
@@ -351,7 +326,6 @@ class DataManager():
 
             match action:
                 case 'upload':
-                    os.makedirs(self.tmp_dir, mode=0o700, exist_ok=True)
                     zip_function = self.upload_zip
                     all_files = iglob(f'{self.source_directory}/**/*.*', recursive=True)
                     all_pages = paginate_generator(all_files, self.page_size)
@@ -365,7 +339,6 @@ class DataManager():
                         paginator = source_client.get_paginator('list_objects_v2')
                         all_pages = paginator.paginate(Bucket=self.source_bucket)
                 case 'compress':
-                    os.makedirs(self.tmp_dir, mode=0o700, exist_ok=True)
                     zip_function = self.generate_zip
                     if inventory:
                         all_files = pd.read_csv(inventory, header=None, names=['Bucket', 'Key', 'Size'], low_memory=False)
@@ -401,13 +374,62 @@ class DataManager():
                         case _:
                             if inventory:
                                 self.file_size = obj[1]['Size']
-                                obj = {'Key': obj[1]['Key'], 'Size': obj[1]['Size'], 'Index': idx, 'Page': pidx, 'KeyId': self.key_id, 'BucketKey': self.key, 'Bucket': self.source_bucket, 'ErrorLog': self.error_log}
+                                obj = {'Key': obj[1]['Key'], 'Size': obj[1]['Size'], 'Index': idx, 'Page': pidx, 'KeyId': self.src_key_id, 'BucketKey': self.src_key, 'Bucket': self.source_bucket, 'ErrorLog': self.error_log}
                             else:
                                 self.file_size = obj['Size']
-                                obj = {'Key': obj['Key'], 'Size': obj['Size'], 'Index': idx, 'Page': pidx, 'KeyId': self.key_id, 'BucketKey': self.key, 'Bucket': self.source_bucket, 'ErrorLog': self.error_log}
+                                obj = {'Key': obj['Key'], 'Size': obj['Size'], 'Index': idx, 'Page': pidx, 'KeyId': self.src_key_id, 'BucketKey': self.src_key, 'Bucket': self.source_bucket, 'ErrorLog': self.error_log}
+
+                    object_path = obj['Key']
+                    
+                    if self.file_size > self.max_file_size:
+
+                        match action:
+                            case 'upload':
+                                try:
+                                    destination_client = self.destination.client('s3')
+                                    self.logger(f'{pidx} {idx} ' + f'Adding: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
+                                    destination_client.upload_file(obj['Key'], self.destination_bucket, obj['Key'], ExtraArgs = { 'StorageClass' : self.destination_class }, Config=self.config)
+                                    self.logger(f'{pidx} {idx} ' + f'Uploaded: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
+                                    time.sleep(self.timeout) if self.timeout else None
+                                except:
+                                    get_logger(level = 'ERROR', log_file = self.error_log).loggerr(f'Error uploading {file_key}')
+                            case 'download':
+                                try:
+                                    self.logger(f'{pidx} {idx} ' + f'Adding: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
+                                    destination_name = os.path.join(self.destination_directory, obj['Key'])
+                                    source_client.download_file(self.destination_bucket, obj['Key'], destination_name, Config=self.config)
+                                    self.logger(f'{pidx} {idx} ' + f'Downloaded: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
+                                    time.sleep(self.timeout) if self.timeout else None
+                                except:
+                                    get_logger(level = 'ERROR', log_file = self.error_log).loggerr(f'Error downloading {file_key}')
+                            case 'compress':
+                                try:
+                                    botocore_config = botocore.config.Config(max_pool_connections = self.njobs, total_max_attempts = 5)
+                                    source_client = boto3.client('s3', config = botocore_config)
+
+                                    transfer_config = s3transfer.TransferConfig(
+                                        use_threads=True,
+                                        max_concurrency=self.njobs,
+                                    )
+                                    s3t = s3transfer.create_transfer_manager(source_client, transfer_config)
+                                    copy_source = {
+                                        'Bucket': self.source_bucket,
+                                        'Key': obj['Key']
+                                    }
+                                    self.logger(f'{pidx} {idx} ' + f'Adding: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
+                                    s3t.copy(copy_source=copy_source,
+                                             bucket = self.destination_bucket,
+                                             key = obj['Key'], extra_args = { 'StorageClass' : self.destination_class })
+
+                                    # close transfer job
+                                    s3t.shutdown()
+                                    self.logger(f'{pidx} {idx} ' + f'Uploaded: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
+                                    time.sleep(self.timeout) if self.timeout else None
+                                except:
+                                    get_logger(level = 'ERROR', log_file = self.error_log).loggerr(f'Error transferring {file_key}')
+                        continue
 
                     self.obj_size += self.file_size
-
                     # Zip buffer size has been exceeded
                     if self.obj_size > self.zip_size:
 
@@ -426,14 +448,16 @@ class DataManager():
                         zip_function(self.zip_list, destination_key, error_log = self.error_log)
                         self.object_count += 1
                         self.obj_size = self.file_size
-
+                    
+                    self.logger(f'{pidx} {idx} ' + f'Adding: {object_path} Size: {self.file_size} ' + f'Total: {self.obj_size}')
                     self.zip_list.append(obj)
-
-            destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
-            zip_function(self.zip_list, destination_key, error_log = self.error_log)
-            self.object_count += 1
-            self.obj_size = 0
-            
+                
+            if len(self.zip_list) != 0:
+                destination_key = self.zip_name + '-' + str(self.object_count) + '.zip'
+                zip_function(self.zip_list, destination_key, error_log = self.error_log)
+                self.object_count += 1
+                self.obj_size = 0
+                
             self.pool.close()
             self.pool.join()
         else:

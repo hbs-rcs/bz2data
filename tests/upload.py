@@ -8,15 +8,13 @@ dest_df = pd.read_csv('/path/to/user_access_keys.csv')
 dest_key_id = dest_df['Access key ID'][0]
 dest_key = dest_df['Secret access key'][0]
 destination_bucket = 'bucket-name'
+destination_region = 'us-east-1'
 
 names = 'research-data-archive'
 
 data_manager = bz2data.DataManager(archive_names = names, destination_class = 'STANDARD', njobs = 12, log_file = 'bz2data-research-data.log', error_log = 'bz2data-error.log')
 
-data_manager.destinationBucket(dest_key_id, dest_key, destination_bucket)
-
-# For really large datasets it make take some time for glob to upload to memory, iglob doesn't work because
-# the number of total files needs to be counted to process in pages therefore dividing the directories is recommended
+data_manager.destinationBucket(dest_key_id, dest_key, destination_bucket, region = destination_region)
 
 all_directories = glob('/path/to/dataset/folders/*')
 

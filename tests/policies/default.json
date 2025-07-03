@@ -1,0 +1,38 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AllBuckets",
+            "Effect": "Allow",
+            "Action": [
+                "s3:ListAllMyBuckets"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "Bucket",
+            "Effect": "Allow",
+            "Action": [
+                "s3:ListBucket",
+                "s3:ListBucketMultipartUploads"
+            ],
+            "Resource": [
+                "arn:aws:s3:::<Bucket>"
+            ]
+        },
+        {
+            "Sid": "Objects",
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:ListMultipartUploadParts",
+                "s3:AbortMultipartUpload"
+            ],
+            "Resource": [
+                "arn:aws:s3:::<Bucket>/*"
+            ]
+        }
+    ]
+}

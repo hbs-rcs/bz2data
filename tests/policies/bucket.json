@@ -1,0 +1,33 @@
+
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "Bucket",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::<ACCOUNTA>:user/<ACCOUNTAANAME>"
+            },
+            "Action": [
+                "s3:ListBucket",
+                "s3:ListBucketMultipartUploads"
+            ],
+            "Resource": "arn:aws:s3:::<DestBucket>"
+        },
+        {
+            "Sid": "Objects",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::<ACCOUNTA>:user/<ACCOUNTAANAME>"
+            },
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:ListMultipartUploadParts",
+                "s3:AbortMultipartUpload"
+            ],
+            "Resource": "arn:aws:s3:::<DestBucket>/*"
+        }
+    ]
+}

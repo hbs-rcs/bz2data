@@ -34,27 +34,41 @@ Usage:
         src_key_id = 'SRC-KEY-ID'
         src_key = 'SRC-KEY'
         source_bucket = 'SOURCE-BUCKET-NAME'
+        source_region = 'us-east-1'
 
         dest_key_id = 'DEST-KEY-ID'
         dest_key = 'DEST-KEY'
         destination_bucket = 'DESTINATION-BUCKET-NAME'
+        destination_region = 'us-east-1'
         
         names = 'research-data-archive'
 
         data_manager = bz2data.DataManager(archive_names = names, log_file = './bz2data-research-data.log', error_log = './bz2data-error.log')
         
-        data_manager.sourceBucket(src_key_id, src_key, source_bucket)
+        data_manager.sourceBucket(src_key_id, src_key, source_bucket, region = source_region)
 
-        data_manager.destinationBucket(dest_key_id, dest_key, destination_bucket)
+        data_manager.destinationBucket(dest_key_id, dest_key, destination_bucket, region = destination_region)
 
         data_manager.compress('compress')
 
 
 Info:
 
+Policy examples in tests/policies
+
+For bucket to bucket add the user.json policy to the user on the source account, bucket.json policy to the destination bucket policy and default.json to the user on the destination account
+
+For upload or dowload add the default.json policy to the user on the source/destination account
+
+Will overwrite .aws/credentials and .aws/config using credential csv files provided
+
 Change zip file size (default: 5000000000)
 
     data_manager = bz2data.DataManager(zip_size = 5000000001, archive_names = names)
+    
+Change max file size compression (default: 9000000000, bigger files will be transferred without compression)
+
+    data_manager = bz2data.DataManager(max_file_size = 8999999999, archive_names = names)
 
 Change destination bucket storage class (default: 'STANDARD')
 
@@ -112,8 +126,12 @@ S3 inventory list
 
     Please refer to the inventory script in the test directory, using S3 inventory will drastically
     reduce listing pricing as the cost is $0.0025 per million objects listed, this is recommended for 
-    extremely large datasets that otherwise would make cost skyrocket with the list v2 api
-
+    extremely large datasets that otherwise would drive up the cost significantly with the list v2 api
+    Inventory files must be created in csv format from the AWS web console
+    
+    data_manager = bz2data.DataManager(archive_names = names, destination_class = 'STANDARD', njobs = 10, log_file = './bz2data-research-data.log', error_log = './bz2data-error.log', timeout = 0)
+    
+    data_manager.compress('download', inventory = 'inventory-file.csv')
 
 Add delay between uploads/downloads to prevent flooding the network (Most of the time it is not necessary)
 
