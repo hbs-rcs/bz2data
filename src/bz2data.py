@@ -44,12 +44,12 @@ def get_object(obj):
     error_log = obj['ErrorLog']
     name = f'{page}-{idx}'
     size = obj['Size']
-    objshm = shared_memory.SharedMemory(name = name, create = True, size=size)
 
     source_sess = boto3.Session(aws_access_key_id = key_id, aws_secret_access_key = bucket_key)
     source_client = source_sess.client('s3')
 
     try:
+        objshm = shared_memory.SharedMemory(name = name, create = True, size=size)
         key_obj = source_client.get_object(Bucket = bucket, Key = file_key)
         objshm.buf[:size] = key_obj['Body'].read()
         objshm.close()
@@ -68,12 +68,11 @@ def get_file(obj):
     error_log = obj['ErrorLog']
     size = obj['Size']
     name = f'{page}-{idx}'
-    objshm = shared_memory.SharedMemory(name = name, create = True, size=size)
-
 
     file_descriptor = os.open(file_key, os.O_RDONLY)
 
     try:
+        objshm = shared_memory.SharedMemory(name = name, create = True, size=size)
         objshm.buf[:size] = os.read(file_descriptor, size)
         objshm.close()
         os.close(file_descriptor)
