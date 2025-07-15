@@ -8,6 +8,7 @@ from glob import glob, iglob
 import pandas as pd
 import botocore
 import zipfile
+import shutil
 import boto3
 import time
 import io
@@ -209,7 +210,7 @@ class DataManager():
             zip_buffer.seek(0)
             buffer_size = zip_buffer.getbuffer().nbytes
             destination_client.upload_fileobj(zip_buffer, self.destination_bucket, save_name, ExtraArgs = { 'StorageClass' : self.destination_class }, Config=self.config)
-            self.logger(f'{last_page} {last_idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
+            self.logger(f'{last_page} {last_idx} ' + f'Transferred: {save_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
 
             time.sleep(self.timeout) if self.timeout else None
         else:
@@ -302,6 +303,50 @@ class DataManager():
             time.sleep(self.timeout) if self.timeout else None
         else:
             print('Error source bucket and destination directory are needed to download')
+            
+    def local_zip(self, files = [], save_name = '', error_log = ''):
+        if all((self.source_directory, self.destination_directory)):
+            zip_buffer = io.BytesIO()
+
+            pool = multiprocessing.Pool(processes=self.njobs)
+            pool_map = pool.map(get_file, files)
+            pool.close()
+            pool.join()
+            
+            if os.path.getsize(self.log_file) > (self.zip_size * 3):
+                os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
+                with open(self.log_file, 'w'):
+                    pass
+                self.logger('BZ2DATA Harvard Business School (2025)\n')
+                
+            last_page, last_idx = files[-1]['Page'], files[-1]['Index']
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
+
+                while files:
+                    try:
+                        obj = files.pop(0)
+                        page = obj['Page']
+                        idx = obj['Index']
+                        object_path, size = obj['Key'], obj['Size']
+                        name = f'{page}-{idx}'
+                        shm = shared_memory.SharedMemory(name=name)
+                        zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
+                        shm.close()
+                        shm.unlink()
+                    except:
+                        pass
+                zip_file.close()
+
+            zip_buffer.seek(0)
+            buffer_size = zip_buffer.getbuffer().nbytes
+            destination_name = os.path.join(self.destination_directory, save_name)
+            with open(destination_name, 'wb') as fd:
+                fd.write(zip_buffer.getvalue())
+            self.logger(f'{last_page} {last_idx} ' + f'Compressed: {destination_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
+
+            time.sleep(self.timeout) if self.timeout else None
+        else:
+            print('Error source directory and destination directory are needed to compress locally')
 
     def compress(self, action, resume = '', inventory = ''):
 
@@ -338,6 +383,10 @@ class DataManager():
                     zip_function = self.upload_zip
                     all_files = iglob(f'{self.source_directory}/**/*.*', recursive=True)
                     all_pages = paginate_generator(all_files, self.page_size)
+                case 'local':
+                    zip_function = self.local_zip
+                    all_files = iglob(f'{self.source_directory}/**/*.*', recursive=True)
+                    all_pages = paginate_generator(all_files, self.page_size)
                 case 'download':
                     zip_function = self.download_zip
                     if inventory:
@@ -365,6 +414,8 @@ class DataManager():
                 match action:
                     case 'upload':
                         page_list = page
+                    case 'local':
+                        page_list = page
                     case _:
                         if inventory:
                             page_list = all_files[page: page + self.page_size].iterrows()
@@ -378,6 +429,9 @@ class DataManager():
 
                     match action:
                         case 'upload':
+                            self.file_size = os.path.getsize(obj)
+                            obj = {'Key': obj, 'Size': self.file_size, 'Index': idx, 'Page': pidx, 'ErrorLog': self.error_log}
+                        case 'local':
                             self.file_size = os.path.getsize(obj)
                             obj = {'Key': obj, 'Size': self.file_size, 'Index': idx, 'Page': pidx, 'ErrorLog': self.error_log}
                         case _:
@@ -402,6 +456,14 @@ class DataManager():
                                     time.sleep(self.timeout) if self.timeout else None
                                 except:
                                     self.loggerr(f'Error uploading {object_path}')
+                            case 'local':
+                                try:
+                                    self.logger(f'{pidx} {idx} ' + f'Adding: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
+                                    shutil.copyfile(object_path, self.destination_directory)
+                                    self.logger(f'{pidx} {idx} ' + f'Uploaded: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
+                                    time.sleep(self.timeout) if self.timeout else None
+                                except:
+                                    self.loggerr(f'Error compressing {object_path}')
                             case 'download':
                                 try:
                                     self.logger(f'{pidx} {idx} ' + f'Adding: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
