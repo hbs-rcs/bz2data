@@ -105,6 +105,16 @@ Download and compress to disk
     data_manager.sourceBucket(src_key_id, src_key, source_bucket)
 
     data_manager.compress('download')
+    
+Compress to local disk
+    
+    data_manager = bz2data.DataManager(archive_names = names,  njobs = 10, log_file = 'bz2data-local-data.log', error_log = 'bz2data-error.log')
+
+    data_manager.sourcePath('unzipped')
+    
+    data_manager.destinationPath('zipped')
+    
+    data_manager.compress('local')
 
 Resume transfer
 
