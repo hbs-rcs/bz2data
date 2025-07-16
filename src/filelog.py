@@ -15,7 +15,7 @@ log_dict = {'DEBUG': logging.DEBUG, 'INFO': logging.INFO, 'WARNING': logging.WAR
 def get_logger(level = 'INFO', log_file = './bz2data.log'):
 
     log_level = log_dict[level]
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger('bz2data')
     logger.setLevel(log_level)
 
     handler = LogHandler(log_file)

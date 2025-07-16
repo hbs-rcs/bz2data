@@ -57,8 +57,7 @@ def get_object(obj):
         objshm.close()
     except:
         with open(error_log, 'a') as error_file:
-            loggerr = get_logger(level = 'ERROR', log_file = error_log)
-            loggerr(f'Error downloading {file_key}')
+            error_file.write(f'Error downloading {file_key}\n')
 
 def get_file(obj):
 
@@ -77,8 +76,7 @@ def get_file(obj):
         os.close(file_descriptor)
     except:
         with open(error_log, 'a') as error_file:
-            loggerr = get_logger(level = 'ERROR', log_file = error_log)
-            loggerr(f'Error downloading or reading {file_key}')
+            error_file.write(f'Error reading {file_key}\n')
             
 class DataManager():
 
@@ -94,7 +92,6 @@ class DataManager():
         self.log_file = log_file
         self.logger = get_logger(level = 'INFO', log_file = self.log_file)
         self.error_log = error_log
-#        self.loggerr = get_logger(level = 'ERROR', log_file = self.error_log)
         self.log_count = 0
         self.zip_name = archive_names
         self.zip_size = zip_size
@@ -475,8 +472,7 @@ class DataManager():
                                     time.sleep(self.timeout) if self.timeout else None
                                 except:
                                     with open(self.error_log, 'a') as error_file:
-                                        loggerr = get_logger(level = 'ERROR', log_file = self.error_log)
-                                        loggerr(f'Error uploading {object_path}')
+                                        error_file.write(f'Error uploading {object_path}\n')
                             case 'local':
                                 try:
                                     self.logger(f'{pidx} {idx} ' + f'Adding: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
@@ -485,8 +481,7 @@ class DataManager():
                                     time.sleep(self.timeout) if self.timeout else None
                                 except:
                                     with open(self.error_log, 'a') as error_file:
-                                        loggerr = get_logger(level = 'ERROR', log_file = self.error_log)
-                                        loggerr(f'Error compressing {object_path}')
+                                        error_file.write(f'Error compressing {object_path}\n')
                             case 'download':
                                 try:
                                     self.logger(f'{pidx} {idx} ' + f'Adding: {object_path} Size: {self.file_size} ' + f'Total: {self.file_size}')
@@ -496,8 +491,7 @@ class DataManager():
                                     time.sleep(self.timeout) if self.timeout else None
                                 except:
                                     with open(self.error_log, 'a') as error_file:
-                                        loggerr = get_logger(level = 'ERROR', log_file = self.error_log)
-                                        loggerr(f'Error downloading {object_path}')
+                                        error_file.write(f'Error downloading {object_path}\n')
                             case 'compress':
                                 try:
                                     botocore_config = botocore.config.Config(max_pool_connections = self.njobs, total_max_attempts = 5)
@@ -523,8 +517,7 @@ class DataManager():
                                     time.sleep(self.timeout) if self.timeout else None
                                 except:
                                     with open(self.error_log, 'a') as error_file:
-                                        loggerr = get_logger(level = 'ERROR', log_file = self.error_log)
-                                        loggerr(f'Error transferring {object_path}')
+                                        error_file.write(f'Error transferring {object_path}\n')
                         continue
 
                     self.obj_size += self.file_size
