@@ -1,4 +1,5 @@
 
+from multiprocessing.managers import SharedMemoryManager
 from boto3.s3.transfer import TransferConfig
 from multiprocessing import shared_memory
 import boto3.s3.transfer as s3transfer
@@ -43,20 +44,18 @@ def get_object(obj):
     bucket_key = obj['BucketKey']
     bucket = obj['Bucket']
     error_log = obj['ErrorLog']
-    name = f'{page}-{idx}'
+    name = obj['SharedName']
     size = obj['Size']
 
     source_sess = boto3.Session(aws_access_key_id = key_id, aws_secret_access_key = bucket_key)
     source_client = source_sess.client('s3')
 
     try:
-        objshm = shared_memory.SharedMemory(name = name, create = True, size=size)
+        objshm = shared_memory.SharedMemory(name = name)
         key_obj = source_client.get_object(Bucket = bucket, Key = file_key)
         objshm.buf[:size] = key_obj['Body'].read()
         objshm.close()
     except:
-        objshm.unlink()
-
         with open(error_log, 'a') as error_file:
             loggerr = get_logger(level = 'ERROR', log_file = error_log)
             loggerr(f'Error downloading {file_key}')
@@ -68,18 +67,15 @@ def get_file(obj):
     file_key = obj['Key']
     error_log = obj['ErrorLog']
     size = obj['Size']
-    name = f'{page}-{idx}'
-
-    file_descriptor = os.open(file_key, os.O_RDONLY)
+    name = obj['SharedName']
 
     try:
-        objshm = shared_memory.SharedMemory(name = name, create = True, size=size)
+        file_descriptor = os.open(file_key, os.O_RDONLY)
+        objshm = shared_memory.SharedMemory(name = name)
         objshm.buf[:size] = os.read(file_descriptor, size)
         objshm.close()
         os.close(file_descriptor)
     except:
-        objshm.unlink()
-
         with open(error_log, 'a') as error_file:
             loggerr = get_logger(level = 'ERROR', log_file = error_log)
             loggerr(f'Error downloading or reading {file_key}')
@@ -178,41 +174,46 @@ class DataManager():
             destination_client = self.destination.client('s3')
             zip_buffer = io.BytesIO()
 
-            pool = multiprocessing.Pool(processes=self.njobs)
-            pool_map = pool.map(get_object, files)
-            pool.close()
-            pool.join()
-            
-            if os.path.getsize(self.log_file) > (self.zip_size * 3):
-                os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
-                with open(self.log_file, 'w'):
-                    pass
-                self.logger('BZ2DATA Harvard Business School (2025)\n')
+            with SharedMemoryManager() as smm:
+                for file_object in files:
+                    object_size = file_object['Size']
+                    shm_name = smm.SharedMemory(size=object_size).name
+                    file_object['SharedName'] = shm_name
+                pool = multiprocessing.Pool(processes=self.njobs)
+                pool_map = pool.map(get_object, files)
+                pool.close()
+                pool.join()
                 
-            last_page, last_idx = files[-1]['Page'], files[-1]['Index']
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
-                
-                while files:
-                    try:
-                        obj = files.pop(0)
-                        page = obj['Page']
-                        idx = obj['Index']
-                        object_path, size = obj['Key'], obj['Size']
-                        name = f'{page}-{idx}'
-                        shm = shared_memory.SharedMemory(name=name)
-                        zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
-                        shm.close()
-                        shm.unlink()
-                    except:
+                if os.path.getsize(self.log_file) > (self.zip_size * 3):
+                    os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
+                    with open(self.log_file, 'w'):
                         pass
-                zip_file.close()
+                    self.logger('BZ2DATA Harvard Business School (2025)\n')
+                    
+                last_page, last_idx = files[-1]['Page'], files[-1]['Index']
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
+                    
+                    while files:
+                        try:
+                            obj = files.pop(0)
+                            page = obj['Page']
+                            idx = obj['Index']
+                            object_path, size = obj['Key'], obj['Size']
+                            name = obj['SharedName']
+                            shm = shared_memory.SharedMemory(name=name)
+                            zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
+                            shm.close()
+                            shm.unlink()
+                        except:
+                            pass
+                    zip_file.close()
 
-            zip_buffer.seek(0)
-            buffer_size = zip_buffer.getbuffer().nbytes
-            destination_client.upload_fileobj(zip_buffer, self.destination_bucket, save_name, ExtraArgs = { 'StorageClass' : self.destination_class }, Config=self.config)
-            self.logger(f'{last_page} {last_idx} ' + f'Transferred: {save_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
+                zip_buffer.seek(0)
+                buffer_size = zip_buffer.getbuffer().nbytes
+                destination_client.upload_fileobj(zip_buffer, self.destination_bucket, save_name, ExtraArgs = { 'StorageClass' : self.destination_class }, Config=self.config)
+                self.logger(f'{last_page} {last_idx} ' + f'Transferred: {save_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
 
-            time.sleep(self.timeout) if self.timeout else None
+                time.sleep(self.timeout) if self.timeout else None
         else:
             print('Error source bucket and destination bucket are needed to compress')
 
@@ -221,42 +222,48 @@ class DataManager():
             destination_client = self.destination.client('s3')
             zip_buffer = io.BytesIO()
 
-            pool = multiprocessing.Pool(processes=self.njobs)
-            pool_map = pool.map(get_file, files)
-            pool.close()
-            pool.join()
-            
-            if os.path.getsize(self.log_file) > (self.zip_size * 3):
-                os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
-                with open(self.log_file, 'w'):
-                    pass
-                self.logger('BZ2DATA Harvard Business School (2025)\n')
+            with SharedMemoryManager() as smm:
+                for file_object in files:
+                    object_size = file_object['Size']
+                    shm_name = smm.SharedMemory(size=object_size).name
+                    file_object['SharedName'] = shm_name
+                    
+                pool = multiprocessing.Pool(processes=self.njobs)
+                pool_map = pool.map(get_file, files)
+                pool.close()
+                pool.join()
                 
-            last_page, last_idx = files[-1]['Page'], files[-1]['Index']
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
-
-                while files:
-                    try:
-                        obj = files.pop(0)
-                        page = obj['Page']
-                        idx = obj['Index']
-                        object_path, size = obj['Key'], obj['Size']
-                        name = f'{page}-{idx}'
-                        shm = shared_memory.SharedMemory(name=name)
-                        zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
-                        shm.close()
-                        shm.unlink()
-                    except:
+                if os.path.getsize(self.log_file) > (self.zip_size * 3):
+                    os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
+                    with open(self.log_file, 'w'):
                         pass
-                zip_file.close()
+                    self.logger('BZ2DATA Harvard Business School (2025)\n')
+                    
+                last_page, last_idx = files[-1]['Page'], files[-1]['Index']
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
 
-            zip_buffer.seek(0)
-            buffer_size = zip_buffer.getbuffer().nbytes
+                    while files:
+                        try:
+                            obj = files.pop(0)
+                            page = obj['Page']
+                            idx = obj['Index']
+                            object_path, size = obj['Key'], obj['Size']
+                            name = obj['SharedName']
+                            shm = shared_memory.SharedMemory(name=name)
+                            zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
+                            shm.close()
+                            shm.unlink()
+                        except:
+                            pass
+                    zip_file.close()
 
-            destination_client.upload_fileobj(zip_buffer, self.destination_bucket, save_name, ExtraArgs = { 'StorageClass' : self.destination_class }, Config=self.config)
-            self.logger(f'{last_page} {last_idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
+                zip_buffer.seek(0)
+                buffer_size = zip_buffer.getbuffer().nbytes
 
-            time.sleep(self.timeout) if self.timeout else None
+                destination_client.upload_fileobj(zip_buffer, self.destination_bucket, save_name, ExtraArgs = { 'StorageClass' : self.destination_class }, Config=self.config)
+                self.logger(f'{last_page} {last_idx} ' + f'Uploaded: {save_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
+
+                time.sleep(self.timeout) if self.timeout else None
         else:
             print('Error source directory and destination bucket are needed to upload')
 
@@ -264,43 +271,49 @@ class DataManager():
         if all((self.source_bucket, self.destination_directory)):
             zip_buffer = io.BytesIO()
 
-            pool = multiprocessing.Pool(processes=self.njobs)
-            pool_map = pool.map(get_object, files)
-            pool.close()
-            pool.join()
+            with SharedMemoryManager() as smm:
+                for file_object in files:
+                    object_size = file_object['Size']
+                    shm_name = smm.SharedMemory(size=object_size).name
+                    file_object['SharedName'] = shm_name
 
-            if os.path.getsize(self.log_file) > (self.zip_size * 3):
-                os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
-                with open(self.log_file, 'w'):
-                    pass
-                self.logger('BZ2DATA Harvard Business School (2025)\n')
+                pool = multiprocessing.Pool(processes=self.njobs)
+                pool_map = pool.map(get_object, files)
+                pool.close()
+                pool.join()
 
-            last_page, last_idx = files[-1]['Page'], files[-1]['Index']
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
-                
-                while files:
-                    try:
-                        obj = files.pop(0)
-                        page = obj['Page']
-                        idx = obj['Index']
-                        object_path, size = obj['Key'], obj['Size']
-                        name = f'{page}-{idx}'
-                        shm = shared_memory.SharedMemory(name=name)
-                        zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
-                        shm.close()
-                        shm.unlink()
-                    except:
+                if os.path.getsize(self.log_file) > (self.zip_size * 3):
+                    os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
+                    with open(self.log_file, 'w'):
                         pass
-                zip_file.close()
+                    self.logger('BZ2DATA Harvard Business School (2025)\n')
 
-            zip_buffer.seek(0)
-            buffer_size = zip_buffer.getbuffer().nbytes
-            destination_name = os.path.join(self.destination_directory, save_name)
-            with open(destination_name, 'wb') as fd:
-                fd.write(zip_buffer.getvalue())
-            self.logger(f'{last_page} {last_idx} ' + f'Downloaded: {destination_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
+                last_page, last_idx = files[-1]['Page'], files[-1]['Index']
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
+                    
+                    while files:
+                        try:
+                            obj = files.pop(0)
+                            page = obj['Page']
+                            idx = obj['Index']
+                            object_path, size = obj['Key'], obj['Size']
+                            name = obj['SharedName']
+                            shm = shared_memory.SharedMemory(name=name)
+                            zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
+                            shm.close()
+                            shm.unlink()
+                        except:
+                            pass
+                    zip_file.close()
 
-            time.sleep(self.timeout) if self.timeout else None
+                zip_buffer.seek(0)
+                buffer_size = zip_buffer.getbuffer().nbytes
+                destination_name = os.path.join(self.destination_directory, save_name)
+                with open(destination_name, 'wb') as fd:
+                    fd.write(zip_buffer.getvalue())
+                self.logger(f'{last_page} {last_idx} ' + f'Downloaded: {destination_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
+
+                time.sleep(self.timeout) if self.timeout else None
         else:
             print('Error source bucket and destination directory are needed to download')
             
@@ -308,43 +321,49 @@ class DataManager():
         if all((self.source_directory, self.destination_directory)):
             zip_buffer = io.BytesIO()
 
-            pool = multiprocessing.Pool(processes=self.njobs)
-            pool_map = pool.map(get_file, files)
-            pool.close()
-            pool.join()
-            
-            if os.path.getsize(self.log_file) > (self.zip_size * 3):
-                os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
-                with open(self.log_file, 'w'):
-                    pass
-                self.logger('BZ2DATA Harvard Business School (2025)\n')
+            with SharedMemoryManager() as smm:
+                for file_object in files:
+                    object_size = file_object['Size']
+                    shm_name = smm.SharedMemory(size=object_size).name
+                    file_object['SharedName'] = shm_name
+                    
+                pool = multiprocessing.Pool(processes=self.njobs)
+                pool_map = pool.map(get_file, files)
+                pool.close()
+                pool.join()
                 
-            last_page, last_idx = files[-1]['Page'], files[-1]['Index']
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
-
-                while files:
-                    try:
-                        obj = files.pop(0)
-                        page = obj['Page']
-                        idx = obj['Index']
-                        object_path, size = obj['Key'], obj['Size']
-                        name = f'{page}-{idx}'
-                        shm = shared_memory.SharedMemory(name=name)
-                        zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
-                        shm.close()
-                        shm.unlink()
-                    except:
+                if os.path.getsize(self.log_file) > (self.zip_size * 3):
+                    os.rename(self.log_file, '.' + self.log_file.split('.')[1] + f'-{self.log_count}' + '.log')
+                    with open(self.log_file, 'w'):
                         pass
-                zip_file.close()
+                    self.logger('BZ2DATA Harvard Business School (2025)\n')
+                    
+                last_page, last_idx = files[-1]['Page'], files[-1]['Index']
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_BZIP2) as zip_file:
 
-            zip_buffer.seek(0)
-            buffer_size = zip_buffer.getbuffer().nbytes
-            destination_name = os.path.join(self.destination_directory, save_name)
-            with open(destination_name, 'wb') as fd:
-                fd.write(zip_buffer.getvalue())
-            self.logger(f'{last_page} {last_idx} ' + f'Compressed: {destination_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
+                    while files:
+                        try:
+                            obj = files.pop(0)
+                            page = obj['Page']
+                            idx = obj['Index']
+                            object_path, size = obj['Key'], obj['Size']
+                            name = obj['SharedName']
+                            shm = shared_memory.SharedMemory(name=name)
+                            zip_file.writestr(object_path, shm.buf[:size].tobytes(), compress_type = zipfile.ZIP_BZIP2)
+                            shm.close()
+                            shm.unlink()
+                        except:
+                            pass
+                    zip_file.close()
 
-            time.sleep(self.timeout) if self.timeout else None
+                zip_buffer.seek(0)
+                buffer_size = zip_buffer.getbuffer().nbytes
+                destination_name = os.path.join(self.destination_directory, save_name)
+                with open(destination_name, 'wb') as fd:
+                    fd.write(zip_buffer.getvalue())
+                self.logger(f'{last_page} {last_idx} ' + f'Compressed: {destination_name} Size: {buffer_size} ' + f'Total: {self.obj_size}')
+
+                time.sleep(self.timeout) if self.timeout else None
         else:
             print('Error source directory and destination directory are needed to compress locally')
 
