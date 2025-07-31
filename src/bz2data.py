@@ -461,6 +461,8 @@ class DataManager():
                     object_path = obj['Key']
                     
                     if self.file_size == 0:
+                        with open(self.error_log, 'a') as error_file:
+                            error_file.write(f'Error file {object_path} size is zero bytes\n')
                         continue
                     
                     if self.file_size > self.max_file_size:
