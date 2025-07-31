@@ -460,6 +460,9 @@ class DataManager():
 
                     object_path = obj['Key']
                     
+                    if self.file_size == 0:
+                        continue
+                    
                     if self.file_size > self.max_file_size:
 
                         match action:
